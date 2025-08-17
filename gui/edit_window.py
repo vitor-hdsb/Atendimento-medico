@@ -109,15 +109,14 @@ class EditWindow(tk.Toplevel):
         self.callback = callback
         self.title("Editar Atendimento")
         self.geometry("900x700")
-        self.atendimento_original = db.get_atendimento_by_id(atendimento_id)
-        self.atendimento_atual = self.atendimento_original
         self.changed = False
         self.condutas_frames = []
 
         # Containers
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
+        main_frame.columnconfigure(0, weight=1)
+        
         canvas = tk.Canvas(main_frame, borderwidth=0)
         v_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
         v_scrollbar.pack(side="right", fill="y")
@@ -145,7 +144,7 @@ class EditWindow(tk.Toplevel):
         self.create_entry_field(id_frame, "Badge Number:", "badge_number", row=0, col=0, read_only=True)
         self.create_entry_field(id_frame, "Nome:", "nome", row=0, col=2)
         self.create_entry_field(id_frame, "Login:", "login", row=1, col=0)
-        self.create_combobox_field(id_frame, "Gestor:", "gestor", OPTIONS["gestores"], row=1, col=2)
+        self.create_combobox_field(id_frame, "Gestor:", "gestor", OPTIONS["gestores"], row=1, col=2, width=40)
         self.create_combobox_field(id_frame, "Turno:", "turno", OPTIONS["turnos"], row=2, col=0)
         self.create_combobox_field(id_frame, "Setor:", "setor", OPTIONS["setores"], row=2, col=2)
         self.create_combobox_field(id_frame, "Processo:", "processo", OPTIONS["processos"], row=3, col=0)
@@ -169,12 +168,14 @@ class EditWindow(tk.Toplevel):
         # Seção de Condutas (dinâmica)
         self.condutas_container = ttk.Frame(self.scrollable_frame)
         self.condutas_container.pack(fill="x", padx=10, pady=5)
-        self.create_conduta_section(self.atendimento_atual.condutas)
+        
+        # O campo de primeira conduta é sempre criado para ser preenchido se existir
+        self.create_conduta_section(index=0)
 
         # Botões
         button_frame = ttk.Frame(self.scrollable_frame)
         button_frame.pack(fill="x", padx=10, pady=10)
-        ttk.Button(button_frame, text="Acrescentar Conduta Médica", command=lambda: self.add_conduta_section()).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Acrescentar Conduta Médica", command=self.add_conduta_section).pack(side="left", padx=5)
         ttk.Button(button_frame, text="Editar Atendimento", command=self.save_and_close).pack(side="right", padx=5)
         ttk.Button(button_frame, text="Fechar Atendimento", command=self.confirm_close).pack(side="right", padx=5)
 
@@ -190,64 +191,58 @@ class EditWindow(tk.Toplevel):
             entry.configure(state="readonly")
         entry.bind("<KeyRelease>", self.mark_as_changed)
 
-    def create_combobox_field(self, parent, label_text, attr_name, options, row, col):
+    def create_combobox_field(self, parent, label_text, attr_name, options, row, col, width=20):
         """Cria e configura um campo de combobox com um label."""
         ttk.Label(parent, text=label_text).grid(row=row, column=col, padx=5, pady=2, sticky="e")
-        combo = ttk.Combobox(parent, values=options)
+        combo = ttk.Combobox(parent, values=options, width=width)
         combo.grid(row=row, column=col+1, padx=5, pady=2, sticky="ew")
         setattr(self, f"combo_{attr_name}", combo)
         combo.bind("<<ComboboxSelected>>", self.mark_as_changed)
         combo.bind("<KeyRelease>", self.mark_as_changed)
 
-    def create_conduta_section(self, condutas: List[Conduta]):
+    def create_conduta_section(self, conduta_data=None, index=0):
         """Cria e popula as seções de conduta."""
-        for i, conduta in enumerate(condutas):
-            conduta_frame = ttk.LabelFrame(self.condutas_container, text=f"Conduta - {i+1}ª")
-            conduta_frame.pack(fill="x", padx=10, pady=5)
-            self.condutas_frames.append(conduta_frame)
-            conduta_frame.columnconfigure(1, weight=1)
-            conduta_frame.columnconfigure(3, weight=1)
-            
-            self.create_combobox_field(conduta_frame, "Ocupacional:", f"conduta_{i}_ocupacional", OPTIONS["ocupacional"], row=0, col=0)
-            self.create_entry_field(conduta_frame, "Hipótese diagnóstica:", f"conduta_{i}_hipotese", row=0, col=2)
-            self.create_entry_field(conduta_frame, "Conduta adotada:", f"conduta_{i}_adotada", row=1, col=0)
-            self.create_combobox_field(conduta_frame, "Resumo da 1ª conduta:", f"conduta_{i}_resumo", OPTIONS["resumo_conduta"], row=1, col=2)
-            self.create_combobox_field(conduta_frame, "Medicamento administrado:", f"conduta_{i}_admin", OPTIONS["medicamento_admin"], row=2, col=0)
-            self.create_entry_field(conduta_frame, "Medicamento:", f"conduta_{i}_medicamento", row=2, col=2)
-            self.create_entry_field(conduta_frame, "Posologia:", f"conduta_{i}_posologia", row=3, col=0)
-            self.create_entry_field(conduta_frame, "Horário da medicação:", f"conduta_{i}_horario", row=3, col=2)
-            self.create_entry_field(conduta_frame, "Observações:", f"conduta_{i}_obs", row=4, col=0)
+        conduta_frame = ttk.LabelFrame(self.condutas_container, text=f"Conduta - {index+1}ª")
+        conduta_frame.pack(fill="x", padx=10, pady=5)
+        conduta_frame.columnconfigure(1, weight=1)
+        conduta_frame.columnconfigure(3, weight=1)
+        
+        # Adiciona o botão de remover se não for a primeira conduta
+        if index > 0:
+            remove_btn = ttk.Button(conduta_frame, text="Remover", command=lambda: self.remove_conduta_section(conduta_frame))
+            remove_btn.grid(row=0, column=4, padx=5, pady=2, sticky="e")
 
-            # Popula os campos da conduta
-            self.get_widget(f"conduta_{i}_hipotese").insert(0, conduta.hipotese_diagnostica)
-            self.get_widget(f"conduta_{i}_adotada").insert(0, conduta.conduta_adotada)
-            self.get_widget(f"conduta_{i}_resumo").set(conduta.resumo_conduta)
-            self.get_widget(f"conduta_{i}_admin").set(conduta.medicamento_administrado)
-            self.get_widget(f"conduta_{i}_medicamento").insert(0, conduta.medicamento)
-            self.get_widget(f"conduta_{i}_posologia").insert(0, conduta.posologia)
-            self.get_widget(f"conduta_{i}_horario").insert(0, conduta.horario_medicacao)
-            self.get_widget(f"conduta_{i}_obs").insert(0, conduta.observacoes)
+        self.create_combobox_field(conduta_frame, "Ocupacional:", f"conduta_{index}_ocupacional", OPTIONS["ocupacional"], row=0, col=0)
+        self.create_entry_field(conduta_frame, "Hipótese diagnóstica:", f"conduta_{index}_hipotese", row=0, col=2)
+        self.create_entry_field(conduta_frame, "Conduta adotada:", f"conduta_{index}_adotada", row=1, col=0)
+        self.create_combobox_field(conduta_frame, "Resumo da 1ª conduta:", f"conduta_{index}_resumo", OPTIONS["resumo_conduta"], row=1, col=2)
+        self.create_combobox_field(conduta_frame, "Medicamento administrado:", f"conduta_{index}_admin", OPTIONS["medicamento_admin"], row=2, col=0)
+        self.create_entry_field(conduta_frame, "Medicamento:", f"conduta_{index}_medicamento", row=2, col=2)
+        self.create_entry_field(conduta_frame, "Posologia:", f"conduta_{index}_posologia", row=3, col=0)
+        self.create_entry_field(conduta_frame, "Horário da medicação:", f"conduta_{index}_horario", row=3, col=2)
+        self.create_entry_field(conduta_frame, "Observações:", f"conduta_{index}_obs", row=4, col=0)
+        
+        self.condutas_frames.append(conduta_frame)
+        self.condutas_frames[index].data = conduta_data # Associa os dados da conduta ao frame
+
+    def remove_conduta_section(self, conduta_frame):
+        """Remove dinamicamente uma seção de conduta."""
+        self.condutas_frames.remove(conduta_frame)
+        conduta_frame.destroy()
+        self.changed = True
+        # Renomeia os títulos dos frames restantes
+        for i, frame in enumerate(self.condutas_frames):
+            frame.config(text=f"Conduta - {i+1}ª")
+        # Atualiza a lista de condutas no objeto Atendimento
+        condutas_data = self.get_form_data().condutas
+        self.atendimento_atual.condutas = condutas_data
 
     def add_conduta_section(self):
         """Adiciona dinamicamente uma nova seção de conduta."""
-        i = len(self.condutas_frames)
-        conduta_frame = ttk.LabelFrame(self.condutas_container, text=f"Conduta - {i+1}ª")
-        conduta_frame.pack(fill="x", padx=10, pady=5)
-        self.condutas_frames.append(conduta_frame)
-        conduta_frame.columnconfigure(1, weight=1)
-        conduta_frame.columnconfigure(3, weight=1)
-
-        self.create_combobox_field(conduta_frame, "Ocupacional:", f"conduta_{i}_ocupacional", OPTIONS["ocupacional"], row=0, col=0)
-        self.create_entry_field(conduta_frame, "Hipótese diagnóstica:", f"conduta_{i}_hipotese", row=0, col=2)
-        self.create_entry_field(conduta_frame, "Conduta adotada:", f"conduta_{i}_adotada", row=1, col=0)
-        self.create_combobox_field(conduta_frame, "Resumo da 1ª conduta:", f"conduta_{i}_resumo", OPTIONS["resumo_conduta"], row=1, col=2)
-        self.create_combobox_field(conduta_frame, "Medicamento administrado:", f"conduta_{i}_admin", OPTIONS["medicamento_admin"], row=2, col=0)
-        self.create_entry_field(conduta_frame, "Medicamento:", f"conduta_{i}_medicamento", row=2, col=2)
-        self.create_entry_field(conduta_frame, "Posologia:", f"conduta_{i}_posologia", row=3, col=0)
-        self.create_entry_field(conduta_frame, "Horário da medicação:", f"conduta_{i}_horario", row=3, col=2)
-        self.create_entry_field(conduta_frame, "Observações:", f"conduta_{i}_obs", row=4, col=0)
+        index = len(self.condutas_frames)
+        self.create_conduta_section(index=index)
         self.changed = True
-
+        
     def get_widget(self, name):
         """Retorna o widget com base no nome do atributo."""
         widget = getattr(self, f"entry_{name}", None)
@@ -257,7 +252,15 @@ class EditWindow(tk.Toplevel):
 
     def load_data(self):
         """Carrega os dados do atendimento selecionado nos campos."""
-        atendimento = self.atendimento_original
+        atendimento = db.get_atendimento_by_id(self.atendimento_id)
+        if not atendimento:
+            messagebox.showerror("Erro", "Atendimento não encontrado.")
+            self.destroy()
+            return
+            
+        self.atendimento_atual = atendimento
+
+        # Preenche os campos principais
         self.get_widget("badge_number").configure(state="normal")
         self.get_widget("badge_number").delete(0, 'end')
         self.get_widget("badge_number").insert(0, atendimento.badge_number)
@@ -273,6 +276,7 @@ class EditWindow(tk.Toplevel):
         self.get_widget("turno").set(atendimento.turno)
         self.get_widget("setor").set(atendimento.setor)
         self.get_widget("processo").set(atendimento.processo)
+        
         self.get_widget("tenure").delete(0, 'end')
         self.get_widget("tenure").insert(0, atendimento.tenure)
         
@@ -297,6 +301,26 @@ class EditWindow(tk.Toplevel):
         self.get_widget("observacoes").delete(0, 'end')
         self.get_widget("observacoes").insert(0, atendimento.observacoes)
         
+        # Preenche as condutas
+        for i, conduta in enumerate(atendimento.condutas):
+            if i > 0: # Adiciona frames para condutas adicionais, se existirem
+                self.create_conduta_section(index=i)
+            self.get_widget(f"conduta_{i}_ocupacional").set(conduta.resumo_conduta)
+            self.get_widget(f"conduta_{i}_hipotese").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_hipotese").insert(0, conduta.hipotese_diagnostica)
+            self.get_widget(f"conduta_{i}_adotada").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_adotada").insert(0, conduta.conduta_adotada)
+            self.get_widget(f"conduta_{i}_resumo").set(conduta.resumo_conduta)
+            self.get_widget(f"conduta_{i}_admin").set(conduta.medicamento_administrado)
+            self.get_widget(f"conduta_{i}_medicamento").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_medicamento").insert(0, conduta.medicamento)
+            self.get_widget(f"conduta_{i}_posologia").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_posologia").insert(0, conduta.posologia)
+            self.get_widget(f"conduta_{i}_horario").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_horario").insert(0, conduta.horario_medicacao)
+            self.get_widget(f"conduta_{i}_obs").delete(0, 'end')
+            self.get_widget(f"conduta_{i}_obs").insert(0, conduta.observacoes)
+
         self.changed = False
 
     def get_form_data(self):
@@ -322,7 +346,7 @@ class EditWindow(tk.Toplevel):
         atendimento.observacoes = self.get_widget("observacoes").get()
 
         condutas = []
-        for i, frame in enumerate(self.condutas_frames):
+        for i in range(len(self.condutas_frames)):
             conduta = Conduta(
                 hipotese_diagnostica=self.get_widget(f"conduta_{i}_hipotese").get(),
                 conduta_adotada=self.get_widget(f"conduta_{i}_adotada").get(),

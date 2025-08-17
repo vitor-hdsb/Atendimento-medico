@@ -10,6 +10,7 @@ import db
 import utils
 from models import Atendimento, Conduta
 from gui.edit_window import EditWindow, OPTIONS
+from gui.export_window import ExportWindow
 
 class MainWindow(tk.Tk):
     def __init__(self):
@@ -17,21 +18,21 @@ class MainWindow(tk.Tk):
         self.title("Registro de Atendimentos Médicos")
         self.geometry("1200x800")
         self.atendimento_id_to_edit = None
+        self.placeholders = {} # Dicionário para armazenar os placeholders
         
         # Configurações do layout
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
-        self.rowconfigure(1, weight=0)
-        self.rowconfigure(2, weight=1)
         
         # Dicionários para fácil acesso aos widgets
         self.entries = {}
         self.comboboxes = {}
-        self.tenure_label = None # Novo label para o Tenure
+        self.tenure_label = None
         
         self.create_widgets()
         self.clear_form()
+        self.refresh_history_tree()
     
     def create_widgets(self):
         """Cria e organiza todos os widgets na janela principal."""
@@ -48,7 +49,7 @@ class MainWindow(tk.Tk):
             "Badge Number": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "badge_number"},
             "Nome": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "nome"},
             "Login": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "login"},
-            "Gestor": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["gestores"], "var_name": "gestor"},
+            "Gestor": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["gestores"], "var_name": "gestor", "width": 40},
             "Turno": {"type": "combobox", "placeholder": "Bipe o crachá ou selecione", "options": OPTIONS["turnos"], "var_name": "turno"},
             "Setor": {"type": "combobox", "placeholder": "Bipe o crachá ou selecione", "options": OPTIONS["setores"], "var_name": "setor"},
             "Processo": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["processos"], "var_name": "processo"},
@@ -100,8 +101,9 @@ class MainWindow(tk.Tk):
         
         # --- Seção de Histórico e Exportação ---
         history_frame = ttk.Frame(self)
-        history_frame.grid(row=0, column=1, rowspan=3, sticky="nsew", padx=10, pady=10)
+        history_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(2, weight=1)
         
         ttk.Label(history_frame, text="Histórico de Atendimentos", font=("Arial", 14, "bold")).pack(pady=(0, 10))
         
@@ -149,11 +151,13 @@ class MainWindow(tk.Tk):
             if config["type"] == "entry":
                 entry = ttk.Entry(parent_frame)
                 entry.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
+                self.placeholders[config["var_name"]] = config["placeholder"]
                 utils.setup_placeholder(entry, config["placeholder"])
                 self.entries[config["var_name"]] = entry
             elif config["type"] == "combobox":
-                combo = ttk.Combobox(parent_frame, values=config["options"])
+                combo = ttk.Combobox(parent_frame, values=config["options"], width=config.get("width", 20))
                 combo.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
+                self.placeholders[config["var_name"]] = config["placeholder"]
                 utils.setup_placeholder(combo, config["placeholder"])
                 self.comboboxes[config["var_name"]] = combo
 
@@ -176,7 +180,7 @@ class MainWindow(tk.Tk):
     def on_badge_number_change(self, event):
         """Preenche automaticamente os campos de identificação ao digitar o Badge Number."""
         badge_number_str = self.entries['badge_number'].get()
-        if badge_number_str.isdigit():
+        if badge_number_str and badge_number_str.isdigit():
             badge_number = int(badge_number_str)
             last_atendimento = db.get_last_atendimento_by_badge(badge_number)
             if last_atendimento:
@@ -190,21 +194,22 @@ class MainWindow(tk.Tk):
                 self.comboboxes['processo'].set(last_atendimento.processo)
                 self.entries['tenure'].delete(0, 'end')
                 self.entries['tenure'].insert(0, last_atendimento.tenure)
-                
-            self.refresh_history_tree()
+        
+        self.refresh_history_tree()
     
     def refresh_history_tree(self, event=None):
         """Atualiza a Treeview do histórico de atendimentos."""
         badge_number_str = self.entries['badge_number'].get()
-        if not badge_number_str.isdigit():
-            # Limpa a Treeview se o Badge Number não for válido
-            for item in self.history_tree.get_children():
-                self.history_tree.delete(item)
-            return
-
-        badge_number = int(badge_number_str)
-        period = self.history_period_var.get()
         
+        # Limpa a Treeview antes de inserir os novos dados
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
+            
+        badge_number = None
+        if badge_number_str.isdigit():
+            badge_number = int(badge_number_str)
+        
+        period = self.history_period_var.get()
         days_ago = 15 # Valor padrão
         if period == "30 dias":
             days_ago = 30
@@ -216,15 +221,10 @@ class MainWindow(tk.Tk):
         
         atendimentos = db.get_atendimentos_by_badge(badge_number, days_ago)
         
-        # Limpa a Treeview antes de inserir os novos dados
-        for item in self.history_tree.get_children():
-            self.history_tree.delete(item)
-        
         if not atendimentos:
             self.history_tree.insert("", "end", values=("Sem atendimentos registrados", "", "", ""))
         else:
             for atendimento in atendimentos:
-                # O índice [4] e [5] contêm data e hora, respectivamente
                 data_hora = f"{atendimento[4]} {atendimento[5]}"
                 self.history_tree.insert("", "end", iid=atendimento[0], values=(atendimento[1], atendimento[2], atendimento[3], data_hora))
     
@@ -284,27 +284,17 @@ class MainWindow(tk.Tk):
             messagebox.showerror("Erro", f"Ocorreu um erro ao salvar o atendimento: {e}")
 
     def clear_form(self):
-        """Limpa todos os campos do formulário."""
-        # Restaura os placeholders para os campos
-        utils.setup_placeholder(self.entries['badge_number'], "Bipe o crachá")
-        utils.setup_placeholder(self.entries['nome'], "Bipe o crachá")
-        utils.setup_placeholder(self.entries['login'], "Bipe o crachá")
-        utils.setup_placeholder(self.entries['tenure'], "Digite a data de admissão")
-        
-        # Limpa todos os outros campos de entrada
+        """Limpa todos os campos do formulário e restaura os placeholders."""
         for name, entry in self.entries.items():
-            if name not in ['badge_number', 'nome', 'login', 'tenure']:
-                entry.delete(0, 'end')
+            entry.delete(0, 'end')
+            utils.setup_placeholder(entry, self.placeholders.get(name, ""))
 
         for name, combo in self.comboboxes.items():
             combo.set("")
+            utils.setup_placeholder(combo, self.placeholders.get(name, ""))
             
         # Limpa o label do tenure
         self.tenure_label.config(text="")
-
-        # Limpa o histórico também
-        for item in self.history_tree.get_children():
-            self.history_tree.delete(item)
 
     def open_export_window(self):
         """Abre a janela de exportação."""

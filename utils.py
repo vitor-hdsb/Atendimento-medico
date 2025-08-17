@@ -15,18 +15,16 @@ def setup_placeholder(widget, placeholder_text):
     style.configure("Placeholder.TEntry", foreground="gray")
     style.configure("Placeholder.TCombobox", foreground="gray")
 
-    # Guarda o estilo original do widget para restaurá-lo depois
-    original_style = widget.cget("style") if widget.cget("style") else f"{widget.winfo_class()}"
-    
-    # Adiciona o placeholder inicial e aplica o estilo de placeholder
-    widget.insert(0, placeholder_text)
-    widget.configure(style=f"Placeholder.{widget.winfo_class()}")
+    # Garante que o placeholder inicial seja exibido
+    if not widget.get():
+        widget.insert(0, placeholder_text)
+        widget.configure(style=f"Placeholder.{widget.winfo_class()}")
 
     def on_focus_in(event):
         # Remove o placeholder e restaura o estilo original
-        if widget.get() == placeholder_text and widget.cget("style").startswith("Placeholder"):
+        if widget.get() == placeholder_text:
             widget.delete(0, 'end')
-            widget.configure(style=original_style)
+            widget.configure(style="")
 
     def on_focus_out(event):
         # Se o campo estiver vazio, insere o placeholder e aplica o estilo novamente
@@ -36,11 +34,12 @@ def setup_placeholder(widget, placeholder_text):
 
     widget.bind('<FocusIn>', on_focus_in)
     widget.bind('<FocusOut>', on_focus_out)
-
+    
     # Permite que o placeholder seja aplicado a Combobox
     if widget.winfo_class() == 'TCombobox':
         def on_combobox_selected(event):
             # Restaura o estilo original quando uma opção é selecionada
             if widget.get() != placeholder_text:
-                widget.configure(style=original_style)
+                widget.configure(style="")
         widget.bind('<<ComboboxSelected>>', on_combobox_selected)
+

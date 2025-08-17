@@ -187,20 +187,31 @@ def get_last_atendimento_by_badge(badge_number):
         )
     return None
 
-def get_atendimentos_by_badge(badge_number, days_ago=15):
-    """Busca atendimentos recentes para um paciente."""
+def get_atendimentos_by_badge(badge_number=None, days_ago=15):
+    """
+    Busca atendimentos recentes para um paciente.
+    Se o crachá não for especificado, busca todos os atendimentos recentes.
+    """
     conn = sqlite3.connect(DB_FILE)
     conn.execute("PRAGMA journal_mode = WAL;")
     cursor = conn.cursor()
     
     date_limit = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
 
-    cursor.execute("""
+    query_params = [date_limit]
+    query_str = """
         SELECT id, badge_number, nome, login, data_atendimento, hora_atendimento
         FROM atendimentos
-        WHERE badge_number = ? AND data_atendimento >= ?
-        ORDER BY data_atendimento DESC, hora_atendimento DESC
-    """, (badge_number, date_limit))
+        WHERE data_atendimento >= ?
+    """
+    
+    if badge_number is not None:
+        query_str += " AND badge_number = ?"
+        query_params.append(badge_number)
+    
+    query_str += " ORDER BY data_atendimento DESC, hora_atendimento DESC"
+    
+    cursor.execute(query_str, query_params)
     
     result = cursor.fetchall()
     conn.close()
