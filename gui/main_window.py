@@ -1,11 +1,19 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import datetime, timedelta
+from datetime import datetime
 import db
 import utils
 from models import Atendimento, Conduta
 from gui.edit_window import EditWindow, OPTIONS
 from gui.export_window import ExportWindow
+import sqlite3
+
+# Constantes para os períodos do filtro
+PERIODO_15_DIAS = "15 dias"
+PERIODO_30_DIAS = "30 dias"
+PERIODO_60_DIAS = "60 dias"
+PERIODO_YTD = "YTD"
+PERIODOS_FILTRO = [PERIODO_15_DIAS, PERIODO_30_DIAS, PERIODO_60_DIAS, PERIODO_YTD]
 
 class MainWindow(tk.Tk):
     def __init__(self):
@@ -29,82 +37,97 @@ class MainWindow(tk.Tk):
         self.entry_pa_diastolica = None
         
         self.create_widgets()
-        self.clear_form()
         self.refresh_history_tree()
     
     def create_widgets(self):
         """Cria e organiza todos os widgets na janela principal."""
+        # --- Frame Principal do Formulário ---
         form_frame = ttk.Frame(self, padding="10")
         form_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         form_frame.columnconfigure(0, weight=1)
         form_frame.columnconfigure(1, weight=1)
-        
-        # Seção de Identificação do paciente
+
+        # --- Validação para aceitar apenas números ---
+        vcmd = (self.register(self.validate_integer_input), '%P')
+
+        # --- Seção de Identificação do paciente ---
         id_frame = ttk.LabelFrame(form_frame, text="Identificação do paciente", padding="10")
-        id_frame.pack(fill="both", expand=True, pady=5)
-        id_frame.columnconfigure(0, weight=1)
+        id_frame.pack(fill="x", expand=False, pady=5)
         id_frame.columnconfigure(1, weight=1)
-        id_frame.columnconfigure(2, weight=1)
         id_frame.columnconfigure(3, weight=1)
         
-        self.create_form_section(id_frame, {
-            "Badge Number": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "badge_number"},
-            "Nome": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "nome"},
-            "Login": {"type": "entry", "placeholder": "Bipe o crachá", "var_name": "login"},
-            "Gestor": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["gestores"], "var_name": "gestor", "width": 40},
-            "Turno": {"type": "combobox", "placeholder": "Bipe o crachá ou selecione", "options": OPTIONS["turnos"], "var_name": "turno"},
-            "Setor": {"type": "combobox", "placeholder": "Bipe o crachá ou selecione", "options": OPTIONS["setores"], "var_name": "setor"},
-            "Processo": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["processos"], "var_name": "processo"},
-            "Tenure": {"type": "entry", "placeholder": "Digite a data de admissão", "var_name": "tenure"},
-        })
-        self.tenure_label = ttk.Label(id_frame, text="")
-        self.tenure_label.grid(row=3, column=3, padx=5, pady=2, sticky="w")
+        # Placeholders de Identificação
+        self.placeholders = {
+            "badge_number": "Bipe o crachá", "nome": "Bipe o crachá",
+            "login": "Bipe o crachá", "gestor": "Selecione",
+            "turno": "Bipe o crachá ou selecione", "setor": "Bipe o crachá ou selecione",
+            "processo": "Selecione", "tenure": "Bipe o crachá",
+            "queixa_outros": "Ex: Dor de cabeça, dor no braço, tontura, fraqueza...",
+            "hqa": "Detalhe a queixa. Ex: Inicio, duração, intensidade, fatores de melhora/piora...",
+            "tax": "Ex: 38º", "pa_sistolica": "120", "pa_diastolica": "80",
+            "fc": "Ex: 90 BPM", "sat": "90%",
+            "doencas_preexistentes": "Ex: Diabetes, Hipertensão, Hipotireoidismo...",
+            "alergias": "Ex: Alergias respiratórias, alergias de contato, alergias ingestivas...",
+            "medicamentos_em_uso": "Ex: Losartana, Metformina, Sinvastatina, Desvelafaxina...",
+            "observacoes": "(Campo livre)",
+            "ocupacional": "Selecione",
+            "hipotese_diagnostica": "Ex: Enxaqueca, amigdalite, lesão por movimento, ansiedade...",
+            "conduta_adotada": "Ex: Descreva a conduta adotada no atendimento",
+            "resumo_conduta": "Selecione",
+            "medicamento_administrado": "Selecione",
+            "posologia": "Ex: 1 comp, 15 gotas",
+            "horario_medicao": "Insira o horário da medicação",
+            "conduta_obs": "(Campo livre)"
+        }
+        
+        # Campos de Identificação
+        self.create_entry_field(id_frame, "Badge Number:", "badge_number", 0, 0, validate_cmd=vcmd)
+        self.create_entry_field(id_frame, "Nome:", "nome", 0, 2)
+        self.create_entry_field(id_frame, "Login:", "login", 1, 0)
+        self.create_combobox_field(id_frame, "Gestor:", "gestor", OPTIONS["gestores"], 1, 2, width=40)
+        self.create_combobox_field(id_frame, "Turno:", "turno", OPTIONS["turnos"], 2, 0)
+        self.create_combobox_field(id_frame, "Setor:", "setor", OPTIONS["setores"], 2, 2)
+        self.create_combobox_field(id_frame, "Processo:", "processo", OPTIONS["processos"], 3, 0)
+        self.create_entry_field(id_frame, "Tenure:", "tenure", 3, 2)
         
         self.entries['badge_number'].bind("<KeyRelease>", self.on_badge_number_change)
-        self.entries['tenure'].bind("<KeyRelease>", self.calculate_tenure)
         
-        # Seção de Anamnese
+        # --- Seção de Anamnese ---
         anamnese_frame = ttk.LabelFrame(form_frame, text="Anamnese", padding="10")
-        anamnese_frame.pack(fill="both", expand=True, pady=5)
-        anamnese_frame.columnconfigure(0, weight=1)
+        anamnese_frame.pack(fill="x", expand=False, pady=5)
         anamnese_frame.columnconfigure(1, weight=1)
-        anamnese_frame.columnconfigure(2, weight=1)
         anamnese_frame.columnconfigure(3, weight=1)
         
         self.create_queixa_section(anamnese_frame)
-        self.create_entry_field(anamnese_frame, "HQA (Histórico da queixa atual):", "hqa", row=1, col=2)
-        self.create_entry_field(anamnese_frame, "TAX:", "tax", row=2, col=0)
+        self.create_entry_field(anamnese_frame, "HQA:", "hqa", 1, 0)
+        self.create_entry_field(anamnese_frame, "TAX:", "tax", 2, 0)
         self.create_pa_section(anamnese_frame)
-        self.create_entry_field(anamnese_frame, "FC:", "fc", row=3, col=0)
-        self.create_entry_field(anamnese_frame, "SAT:", "sat", row=3, col=2)
-        self.create_entry_field(anamnese_frame, "Doenças pré-existentes:", "doencas_preexistentes", row=4, col=0)
-        self.create_entry_field(anamnese_frame, "Alergias:", "alergias", row=4, col=2)
-        self.create_entry_field(anamnese_frame, "Medicamentos em uso:", "medicamentos_em_uso", row=5, col=0)
-        self.create_entry_field(anamnese_frame, "Observações:", "observacoes", row=5, col=2)
+        self.create_entry_field(anamnese_frame, "FC:", "fc", 3, 0)
+        self.create_entry_field(anamnese_frame, "SAT:", "sat", 3, 2)
+        self.create_entry_field(anamnese_frame, "Doenças pré-existentes:", "doencas_preexistentes", 4, 0)
+        self.create_entry_field(anamnese_frame, "Alergias:", "alergias", 4, 2)
+        self.create_entry_field(anamnese_frame, "Medicamentos em uso:", "medicamentos_em_uso", 5, 0)
+        self.create_entry_field(anamnese_frame, "Observações:", "observacoes", 5, 2)
 
-        # Seção de Conduta de Enfermagem
+        # --- Seção de Conduta de Enfermagem ---
         conduta_frame = ttk.LabelFrame(form_frame, text="Conduta de Enfermagem", padding="10")
-        conduta_frame.pack(fill="both", expand=True, pady=5)
-        conduta_frame.columnconfigure(0, weight=1)
+        conduta_frame.pack(fill="x", expand=False, pady=5)
         conduta_frame.columnconfigure(1, weight=1)
-        conduta_frame.columnconfigure(2, weight=1)
         conduta_frame.columnconfigure(3, weight=1)
         
-        self.create_form_section(conduta_frame, {
-            "Ocupacional": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["ocupacional"], "var_name": "ocupacional"},
-            "Hipótese diagnóstica": {"type": "entry", "placeholder": "Ex: Enxaqueca...", "var_name": "hipotese_diagnostica"},
-            "Conduta adotada": {"type": "entry", "placeholder": "Descreva a conduta...", "var_name": "conduta_adotada"},
-            "Resumo da 1ª conduta": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["resumo_conduta"], "var_name": "resumo_conduta", "width": 40},
-            "Medicamento administrado": {"type": "combobox", "placeholder": "Selecione", "options": OPTIONS["medicamento_admin"], "var_name": "medicamento_administrado"},
-            "Posologia": {"type": "entry", "placeholder": "Ex: 1 comp, 15 gotas", "var_name": "posologia"},
-            "Horário da medicação": {"type": "entry", "placeholder": "Insira o horário da medicação", "var_name": "horario_medicao"},
-            "Observações": {"type": "entry", "placeholder": "(campo livre)", "var_name": "conduta_obs"},
-        })
+        self.create_combobox_field(conduta_frame, "Ocupacional:", "ocupacional", OPTIONS["ocupacional"], 0, 0)
+        self.create_entry_field(conduta_frame, "Hipótese diagnóstica:", "hipotese_diagnostica", 0, 2)
+        self.create_entry_field(conduta_frame, "Conduta adotada:", "conduta_adotada", 1, 0)
+        self.create_combobox_field(conduta_frame, "Resumo da 1ª conduta:", "resumo_conduta", OPTIONS["resumo_conduta"], 1, 2, width=40)
+        self.create_combobox_field(conduta_frame, "Medicamento administrado:", "medicamento_administrado", OPTIONS["medicamento_admin"], 2, 0)
+        self.create_entry_field(conduta_frame, "Posologia:", "posologia", 2, 2)
+        self.create_entry_field(conduta_frame, "Horário da medicação:", "horario_medicao", 3, 0)
+        self.create_entry_field(conduta_frame, "Observações:", "conduta_obs", 3, 2)
         
         save_button = ttk.Button(form_frame, text="Salvar Atendimento", command=self.save_atendimento)
         save_button.pack(pady=10)
         
-        # Seção de Histórico e Exportação
+        # --- Seção de Histórico e Exportação ---
         history_frame = ttk.Frame(self)
         history_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         history_frame.columnconfigure(0, weight=1)
@@ -115,8 +138,8 @@ class MainWindow(tk.Tk):
         period_frame = ttk.Frame(history_frame)
         period_frame.pack(fill="x")
         ttk.Label(period_frame, text="Filtrar por:").pack(side="left", padx=5)
-        self.history_period_var = tk.StringVar(value="15 dias")
-        self.history_period_combo = ttk.Combobox(period_frame, textvariable=self.history_period_var, values=["15 dias", "30 dias", "60 dias", "YTD"], state="readonly")
+        self.history_period_var = tk.StringVar(value=PERIODO_15_DIAS)
+        self.history_period_combo = ttk.Combobox(period_frame, textvariable=self.history_period_var, values=PERIODOS_FILTRO, state="readonly")
         self.history_period_combo.pack(side="left", padx=5)
         self.history_period_combo.bind("<<ComboboxSelected>>", self.refresh_history_tree)
 
@@ -144,49 +167,37 @@ class MainWindow(tk.Tk):
         export_button = ttk.Button(history_frame, text="Exportar Dados", command=self.open_export_window)
         export_button.pack(pady=10)
 
-    def create_entry_field(self, parent, label_text, attr_name, row, col):
+        # Inicia com o formulário limpo
+        self.clear_form()
+
+    def validate_integer_input(self, value_if_allowed):
+        """Permite apenas dígitos no campo de entrada."""
+        if value_if_allowed.isdigit() or value_if_allowed == "":
+            return True
+        return False
+
+    def create_entry_field(self, parent, label_text, attr_name, row, col, validate_cmd=None):
         """Cria e configura um campo de entrada com um label."""
-        ttk.Label(parent, text=label_text).grid(row=row, column=col, padx=5, pady=2, sticky="e")
-        entry = ttk.Entry(parent)
-        entry.grid(row=row, column=col+1, padx=5, pady=2, sticky="ew")
+        ttk.Label(parent, text=label_text).grid(row=row, column=col*2, padx=5, pady=2, sticky="w")
+        entry = ttk.Entry(parent, validate="key", validatecommand=validate_cmd)
+        entry.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
         self.entries[attr_name] = entry
         utils.setup_placeholder(entry, self.placeholders.get(attr_name, ""))
 
     def create_combobox_field(self, parent, label_text, attr_name, options, row, col, width=20):
         """Cria e configura um campo de combobox com um label."""
-        ttk.Label(parent, text=label_text).grid(row=row, column=col, padx=5, pady=2, sticky="e")
+        ttk.Label(parent, text=label_text).grid(row=row, column=col*2, padx=5, pady=2, sticky="w")
         combo = ttk.Combobox(parent, values=options, width=width, state="readonly")
-        combo.grid(row=row, column=col+1, padx=5, pady=2, sticky="ew")
+        combo.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
         self.comboboxes[attr_name] = combo
         utils.setup_placeholder(combo, self.placeholders.get(attr_name, ""))
                 
-    def create_form_section(self, parent_frame, fields):
-        """Função utilitária para criar seções de formulário."""
-        for i, (label_text, config) in enumerate(fields.items()):
-            row, col = divmod(i, 2)
-            ttk.Label(parent_frame, text=label_text).grid(row=row, column=col*2, padx=5, pady=2, sticky="e")
-            
-            if config["type"] == "entry":
-                entry = ttk.Entry(parent_frame)
-                entry.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
-                self.placeholders[config["var_name"]] = config["placeholder"]
-                utils.setup_placeholder(entry, config["placeholder"])
-                self.entries[config["var_name"]] = entry
-            elif config["type"] == "combobox":
-                combo = ttk.Combobox(parent_frame, values=config["options"], width=config.get("width", 20), state="readonly")
-                combo.grid(row=row, column=col*2+1, padx=5, pady=2, sticky="ew")
-                self.placeholders[config["var_name"]] = config["placeholder"]
-                utils.setup_placeholder(combo, config["placeholder"])
-                self.comboboxes[config["var_name"]] = combo
-                
     def create_queixa_section(self, parent):
         """Cria a seção de queixas com caixas de seleção."""
-        ttk.Label(parent, text="Queixa principal:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ttk.Label(parent, text="Queixa principal:").grid(row=0, column=0, columnspan=4, padx=5, pady=2, sticky="w")
         
         queixa_frame = ttk.Frame(parent)
         queixa_frame.grid(row=0, column=1, columnspan=3, padx=5, pady=2, sticky="ew")
-        queixa_frame.columnconfigure(0, weight=1)
-        queixa_frame.columnconfigure(1, weight=1)
         
         self.queixas_vars = {}
         queixas_list = ["Dor de cabeça", "Enjoo", "Tontura", "Fraqueza", "Outros"]
@@ -194,95 +205,95 @@ class MainWindow(tk.Tk):
         for i, queixa in enumerate(queixas_list):
             var = tk.BooleanVar()
             self.queixas_vars[queixa] = var
-            chk = ttk.Checkbutton(queixa_frame, text=queixa, variable=var)
-            chk.grid(row=0, column=i, padx=5, sticky="w")
-            var.trace("w", lambda *args, q=queixa: self.toggle_other_queixa(q))
-            
+            chk = ttk.Checkbutton(queixa_frame, text=queixa, variable=var, command=lambda q=queixa: self.toggle_other_queixa(q))
+            chk.pack(side="left", padx=5)
+
         self.queixa_outros_entry = ttk.Entry(queixa_frame, state="disabled")
-        self.queixa_outros_entry.grid(row=0, column=len(queixas_list), padx=5, sticky="ew")
+        self.queixa_outros_entry.pack(side="left", fill="x", expand=True, padx=5)
+        utils.setup_placeholder(self.queixa_outros_entry, self.placeholders.get("queixa_outros"))
 
     def toggle_other_queixa(self, queixa):
         """Habilita/desabilita o campo 'Outros'."""
         if queixa == "Outros":
-            state = tk.NORMAL if self.queixas_vars["Outros"].get() else tk.DISABLED
-            self.queixa_outros_entry.config(state=state)
+            is_checked = self.queixas_vars["Outros"].get()
+            new_state = tk.NORMAL if is_checked else tk.DISABLED
+            self.queixa_outros_entry.config(state=new_state)
+            if not is_checked:
+                self.queixa_outros_entry.delete(0, 'end')
+                utils.setup_placeholder(self.queixa_outros_entry, self.placeholders.get("queixa_outros", ""))
 
     def create_pa_section(self, parent):
         """Cria os campos para pressão arterial."""
-        ttk.Label(parent, text="PA:").grid(row=2, column=2, padx=5, pady=2, sticky="e")
+        ttk.Label(parent, text="PA:").grid(row=2, column=2, padx=5, pady=2, sticky="w")
         pa_frame = ttk.Frame(parent)
         pa_frame.grid(row=2, column=3, padx=5, pady=2, sticky="ew")
         
         self.entry_pa_sistolica = ttk.Entry(pa_frame, width=5)
-        self.entry_pa_sistolica.pack(side="left", fill="x", expand=True)
-        ttk.Label(pa_frame, text="x").pack(side="left")
+        self.entry_pa_sistolica.pack(side="left")
+        ttk.Label(pa_frame, text="/").pack(side="left")
         self.entry_pa_diastolica = ttk.Entry(pa_frame, width=5)
-        self.entry_pa_diastolica.pack(side="left", fill="x", expand=True)
+        self.entry_pa_diastolica.pack(side="left")
+        ttk.Label(pa_frame, text="mmHg").pack(side="left", padx=5)
         
-        self.placeholders["pa_sistolica"] = "Diastólica"
-        self.placeholders["pa_diastolica"] = "Sistólica"
+        self.entries['pa_sistolica'] = self.entry_pa_sistolica
+        self.entries['pa_diastolica'] = self.entry_pa_diastolica
         utils.setup_placeholder(self.entry_pa_sistolica, self.placeholders["pa_sistolica"])
         utils.setup_placeholder(self.entry_pa_diastolica, self.placeholders["pa_diastolica"])
 
-    def calculate_tenure(self, event=None):
-        """Calcula e exibe o número de dias desde a data de admissão."""
-        tenure_str = self.entries['tenure'].get()
-        if not tenure_str or tenure_str == self.placeholders.get("tenure"):
-            self.tenure_label.config(text="")
-            return
-            
-        try:
-            admissao_date = datetime.strptime(tenure_str, "%d/%m/%Y").date()
-            hoje = datetime.now().date()
-            diferenca = hoje - admissao_date
-            self.tenure_label.config(text=f"{diferenca.days} Dias")
-        except ValueError:
-            self.tenure_label.config(text="Formato de data inválido")
-
     def on_badge_number_change(self, event):
-        """Preenche automaticamente os campos de identificação ao digitar o Badge Number."""
+        """Preenche ou limpa os campos com base no Badge Number."""
         badge_number_str = self.entries['badge_number'].get()
-        if badge_number_str and badge_number_str.isdigit():
-            badge_number = int(badge_number_str)
-            last_atendimento = db.get_last_atendimento_by_badge(badge_number)
+        
+        if not badge_number_str:
+            self.clear_form(clear_badge=False)
+        else:
+            last_atendimento = db.get_last_atendimento_by_badge(badge_number_str)
             if last_atendimento:
-                self.entries['nome'].delete(0, 'end')
+                # Limpa placeholders antes de inserir
+                for name, widget in {**self.entries, **self.comboboxes}.items():
+                    if name != 'badge_number':
+                        utils.clear_placeholder(widget, self.placeholders.get(name))
+                
                 self.entries['nome'].insert(0, last_atendimento.nome)
-                self.entries['login'].delete(0, 'end')
                 self.entries['login'].insert(0, last_atendimento.login)
                 self.comboboxes['gestor'].set(last_atendimento.gestor)
                 self.comboboxes['turno'].set(last_atendimento.turno)
                 self.comboboxes['setor'].set(last_atendimento.setor)
                 self.comboboxes['processo'].set(last_atendimento.processo)
-                self.entries['tenure'].delete(0, 'end')
                 self.entries['tenure'].insert(0, last_atendimento.tenure)
+                
+                # Garante que placeholders sejam removidos se o campo foi preenchido
+                for name, widget in {**self.entries, **self.comboboxes}.items():
+                    utils.remove_placeholder_on_fill(widget, self.placeholders.get(name, ""))
+        
         self.refresh_history_tree()
     
     def refresh_history_tree(self, event=None):
         """Atualiza a Treeview do histórico de atendimentos."""
-        badge_number_str = self.entries['badge_number'].get()
+        badge_widget = self.entries.get('badge_number')
+        badge_number_str = badge_widget.get() if badge_widget else ""
         
         for item in self.history_tree.get_children():
             self.history_tree.delete(item)
-            
-        badge_number = None
-        if badge_number_str.isdigit():
-            badge_number = int(badge_number_str)
-        
+
+        is_placeholder = (badge_number_str == self.placeholders.get("badge_number"))
+        badge_number = None if not badge_number_str or is_placeholder else badge_number_str
+
         period = self.history_period_var.get()
-        days_ago = 15
-        if period == "30 dias":
-            days_ago = 30
-        elif period == "60 dias":
-            days_ago = 60
-        elif period == "YTD":
+        days_ago = {
+            PERIODO_15_DIAS: 15,
+            PERIODO_30_DIAS: 30,
+            PERIODO_60_DIAS: 60,
+        }.get(period, 15)
+
+        if period == PERIODO_YTD:
             start_of_year = datetime.now().replace(month=1, day=1)
             days_ago = (datetime.now() - start_of_year).days + 1
         
         atendimentos = db.get_atendimentos_by_badge(badge_number, days_ago)
         
         if not atendimentos:
-            self.history_tree.insert("", "end", values=("Sem atendimentos registrados", "", "", ""))
+            self.history_tree.insert("", "end", values=("Sem atendimentos no período", "", "", ""))
         else:
             for atendimento in atendimentos:
                 data_hora = f"{atendimento[4]} {atendimento[5]}"
@@ -292,99 +303,69 @@ class MainWindow(tk.Tk):
         """Abre a janela de edição ao dar um duplo-clique em um item da Treeview."""
         selected_item = self.history_tree.selection()
         if selected_item:
-            self.atendimento_id_to_edit = int(selected_item[0])
-            EditWindow(self, self.atendimento_id_to_edit, self.refresh_history_tree)
+            try:
+                self.atendimento_id_to_edit = int(selected_item[0])
+                EditWindow(self, self.atendimento_id_to_edit, self.refresh_history_tree)
+            except (ValueError, IndexError):
+                pass
             
     def save_atendimento(self):
         """Valida o formulário e salva um novo atendimento."""
-        badge_number_str = self.entries['badge_number'].get()
-        if not badge_number_str.isdigit():
-            messagebox.showerror("Erro de Validação", "Badge Number deve ser um número válido.")
-            return
-
         try:
-            # Validação de tipos
-            tax_val = self.entries['tax'].get()
-            if tax_val and not isinstance(float(tax_val), float):
-                messagebox.showerror("Erro de Validação", "TAX deve ser um número válido.")
+            badge_number = self.entries['badge_number'].get()
+            if not badge_number or badge_number == self.placeholders.get('badge_number'):
+                messagebox.showerror("Erro de Validação", "O campo Badge Number é obrigatório.")
                 return
 
-            fc_val = self.entries['fc'].get()
-            if fc_val and not fc_val.isdigit():
-                messagebox.showerror("Erro de Validação", "FC deve ser um número inteiro.")
-                return
-            
-            sat_val = self.entries['sat'].get()
-            if sat_val and not sat_val.isdigit():
-                messagebox.showerror("Erro de Validação", "SAT deve ser um número inteiro.")
-                return
+            # Validações numéricas
+            for field in ['tax', 'fc', 'sat', 'pa_sistolica', 'pa_diastolica']:
+                value = self.entries[field].get()
+                if value and value != self.placeholders.get(field):
+                    float(value)
 
-            pa_sistolica = self.entry_pa_sistolica.get()
-            pa_diastolica = self.entry_pa_diastolica.get()
-            if pa_sistolica and not pa_sistolica.isdigit():
-                messagebox.showerror("Erro de Validação", "Pressão Sistólica (PA) deve ser um número inteiro.")
-                return
-            if pa_diastolica and not pa_diastolica.isdigit():
-                messagebox.showerror("Erro de Validação", "Pressão Diastólica (PA) deve ser um número inteiro.")
-                return
-
-            # Coleta das queixas
             queixas_selecionadas = [q for q, var in self.queixas_vars.items() if var.get() and q != "Outros"]
-            if self.queixas_vars["Outros"].get() and self.queixa_outros_entry.get():
+            if self.queixas_vars.get("Outros", tk.BooleanVar(value=False)).get() and self.queixa_outros_entry.get():
                 queixas_selecionadas.append(self.queixa_outros_entry.get())
-            queixas_str = ";".join(queixas_selecionadas)
+            queixas_str = ";".join(queixas_selecionadas) if queixas_selecionadas else "N/A"
 
-            conduta = Conduta(
-                hipotese_diagnostica=self.entries['hipotese_diagnostica'].get() or "N/A",
-                conduta_adotada=self.entries['conduta_adotada'].get() or "N/A",
-                resumo_conduta=self.comboboxes['resumo_conduta'].get() or "N/A",
-                medicamento_administrado=self.comboboxes['medicamento_administrado'].get() or "N/A",
-                posologia=self.entries['posologia'].get() or "N/A",
-                horario_medicacao=self.entries['horario_medicao'].get() or "N/A",
-                observacoes=self.entries['conduta_obs'].get() or "N/A"
-            )
-
-            # Adiciona data, hora e semana ISO ao objeto de atendimento
-            data_atendimento = datetime.now().strftime("%Y-%m-%d")
-            hora_atendimento = datetime.now().strftime("%H:%M:%S")
-            semana_iso = datetime.now().isocalendar()[1]
-
+            conduta_data = {}
+            for key in self.entries:
+                if key.startswith('conduta_'):
+                    conduta_data[key.replace('conduta_', '')] = self.entries[key].get() or "N/A"
+            for key in self.comboboxes:
+                 if key.startswith('conduta_'):
+                    conduta_data[key.replace('conduta_', '')] = self.comboboxes[key].get() or "N/A"
+            conduta = Conduta(**conduta_data)
+            
+            now = datetime.now()
+            atendimento_data = {key: (widget.get() if widget.get() != self.placeholders.get(key) else "N/A") for key, widget in {**self.entries, **self.comboboxes}.items()}
             atendimento = Atendimento(
-                badge_number=int(badge_number_str),
-                nome=self.entries['nome'].get() or "N/A",
-                login=self.entries['login'].get() or "N/A",
-                gestor=self.comboboxes['gestor'].get() or "N/A",
-                turno=self.comboboxes['turno'].get() or "N/A",
-                setor=self.comboboxes['setor'].get() or "N/A",
-                processo=self.comboboxes['processo'].get() or "N/A",
-                tenure=self.entries['tenure'].get() or "N/A",
+                **atendimento_data,
                 queixas_principais=queixas_str,
-                hqa=self.entries['hqa'].get() or "N/A",
-                tax=self.entries['tax'].get() or "N/A",
-                pa_sistolica=pa_sistolica or "N/A",
-                pa_diastolica=pa_diastolica or "N/A",
-                fc=fc_val or "N/A",
-                sat=sat_val or "N/A",
-                doencas_preexistentes=self.entries['doencas_preexistentes'].get() or "N/A",
-                alergias=self.entries['alergias'].get() or "N/A",
-                medicamentos_em_uso=self.entries['medicamentos_em_uso'].get() or "N/A",
-                observacoes=self.entries['observacoes'].get() or "N/A",
                 condutas=[conduta],
-                data_atendimento=data_atendimento,
-                hora_atendimento=hora_atendimento,
-                semana_iso=semana_iso
+                data_atendimento=now.strftime("%Y-%m-%d"),
+                hora_atendimento=now.strftime("%H:%M:%S"),
+                semana_iso=now.isocalendar()[1]
             )
 
             db.save_atendimento(atendimento)
             messagebox.showinfo("Sucesso", "Atendimento salvo com sucesso!")
             self.clear_form()
             self.refresh_history_tree()
+        except ValueError:
+            messagebox.showerror("Erro de Validação", "Verifique se os campos numéricos (TAX, FC, SAT, PA) estão corretos.")
+        except sqlite3.Error as e:
+            messagebox.showerror("Erro de Banco de Dados", f"Ocorreu um erro ao salvar: {e}")
         except Exception as e:
-            messagebox.showerror("Erro", f"Ocorreu um erro ao salvar o atendimento: {e}")
+            messagebox.showerror("Erro", f"Ocorreu um erro inesperado: {e}")
 
-    def clear_form(self):
+    def clear_form(self, clear_badge=True):
         """Limpa todos os campos do formulário e restaura os placeholders."""
-        for name, entry in self.entries.items():
+        widgets_to_clear = self.entries.copy()
+        if not clear_badge:
+            widgets_to_clear.pop('badge_number', None)
+
+        for name, entry in widgets_to_clear.items():
             entry.delete(0, 'end')
             utils.setup_placeholder(entry, self.placeholders.get(name, ""))
 
@@ -392,21 +373,13 @@ class MainWindow(tk.Tk):
             combo.set("")
             utils.setup_placeholder(combo, self.placeholders.get(name, ""))
         
-        # Limpa os campos da queixa
         for var in self.queixas_vars.values():
             var.set(False)
-        if self.queixa_outros_entry:
-            self.queixa_outros_entry.delete(0, 'end')
-            self.queixa_outros_entry.config(state="disabled")
 
-        # Limpa os campos de PA
-        self.entry_pa_sistolica.delete(0, 'end')
-        utils.setup_placeholder(self.entry_pa_sistolica, self.placeholders["pa_sistolica"])
-        self.entry_pa_diastolica.delete(0, 'end')
-        utils.setup_placeholder(self.entry_pa_diastolica, self.placeholders["pa_diastolica"])
-        
-        self.tenure_label.config(text="")
+        if self.queixa_outros_entry:
+            self.toggle_other_queixa("Outros") # Reseta o estado e o placeholder
 
     def open_export_window(self):
         """Abre a janela de exportação."""
         ExportWindow(self)
+
