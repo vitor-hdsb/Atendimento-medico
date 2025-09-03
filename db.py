@@ -31,10 +31,11 @@ def init_db():
             setor TEXT,
             processo TEXT,
             tenure TEXT,
-            queixa_principal TEXT,
+            queixas_principais TEXT,
             hqa TEXT,
             tax TEXT,
-            pa TEXT,
+            pa_sistolica TEXT,
+            pa_diastolica TEXT,
             fc TEXT,
             sat TEXT,
             doencas_preexistentes TEXT,
@@ -56,7 +57,6 @@ def init_db():
             conduta_adotada TEXT,
             resumo_conduta TEXT,
             medicamento_administrado TEXT,
-            medicamento TEXT,
             posologia TEXT,
             horario_medicacao TEXT,
             observacoes TEXT,
@@ -76,15 +76,15 @@ def save_atendimento(atendimento: Atendimento):
     cursor.execute("""
         INSERT INTO atendimentos (
             badge_number, nome, login, gestor, turno, setor, processo, tenure,
-            queixa_principal, hqa, tax, pa, fc, sat, doencas_preexistentes,
+            queixas_principais, hqa, tax, pa_sistolica, pa_diastolica, fc, sat, doencas_preexistentes,
             alergias, medicamentos_em_uso, observacoes, data_atendimento,
             hora_atendimento, semana_iso
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         atendimento.badge_number, atendimento.nome, atendimento.login, atendimento.gestor,
         atendimento.turno, atendimento.setor, atendimento.processo, atendimento.tenure,
-        atendimento.queixa_principal, atendimento.hqa, atendimento.tax, atendimento.pa,
-        atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
+        atendimento.queixas_principais, atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
+        atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
         atendimento.alergias, atendimento.medicamentos_em_uso, atendimento.observacoes,
         atendimento.data_atendimento, atendimento.hora_atendimento, atendimento.semana_iso
     ))
@@ -95,12 +95,12 @@ def save_atendimento(atendimento: Atendimento):
         cursor.execute("""
             INSERT INTO condutas (
                 atendimento_id, hipotese_diagnostica, conduta_adotada, resumo_conduta,
-                medicamento_administrado, medicamento, posologia, horario_medicacao,
+                medicamento_administrado, posologia, horario_medicacao,
                 observacoes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             atendimento_id, conduta.hipotese_diagnostica, conduta.conduta_adotada,
-            conduta.resumo_conduta, conduta.medicamento_administrado, conduta.medicamento,
+            conduta.resumo_conduta, conduta.medicamento_administrado,
             conduta.posologia, conduta.horario_medicacao, conduta.observacoes
         ))
 
@@ -131,19 +131,20 @@ def get_atendimento_by_id(atendimento_id):
         setor=atendimento_data[6],
         processo=atendimento_data[7],
         tenure=atendimento_data[8],
-        queixa_principal=atendimento_data[9],
+        queixas_principais=atendimento_data[9],
         hqa=atendimento_data[10],
         tax=atendimento_data[11],
-        pa=atendimento_data[12],
-        fc=atendimento_data[13],
-        sat=atendimento_data[14],
-        doencas_preexistentes=atendimento_data[15],
-        alergias=atendimento_data[16],
-        medicamentos_em_uso=atendimento_data[17],
-        observacoes=atendimento_data[18],
-        data_atendimento=atendimento_data[19],
-        hora_atendimento=atendimento_data[20],
-        semana_iso=atendimento_data[21]
+        pa_sistolica=atendimento_data[12],
+        pa_diastolica=atendimento_data[13],
+        fc=atendimento_data[14],
+        sat=atendimento_data[15],
+        doencas_preexistentes=atendimento_data[16],
+        alergias=atendimento_data[17],
+        medicamentos_em_uso=atendimento_data[18],
+        observacoes=atendimento_data[19],
+        data_atendimento=atendimento_data[20],
+        hora_atendimento=atendimento_data[21],
+        semana_iso=atendimento_data[22]
     )
 
     # Busca as condutas associadas
@@ -155,10 +156,9 @@ def get_atendimento_by_id(atendimento_id):
             conduta_adotada=c[3],
             resumo_conduta=c[4],
             medicamento_administrado=c[5],
-            medicamento=c[6],
-            posologia=c[7],
-            horario_medicacao=c[8],
-            observacoes=c[9]
+            posologia=c[6],
+            horario_medicacao=c[7],
+            observacoes=c[8]
         ) for c in condutas_data
     ]
 
@@ -227,15 +227,15 @@ def update_atendimento(atendimento: Atendimento):
     cursor.execute("""
         UPDATE atendimentos SET
             nome = ?, login = ?, gestor = ?, turno = ?, setor = ?, processo = ?,
-            tenure = ?, queixa_principal = ?, hqa = ?, tax = ?, pa = ?, fc = ?,
-            sat = ?, doencas_preexistentes = ?, alergias = ?, medicamentos_em_uso = ?,
-            observacoes = ?
+            tenure = ?, queixas_principais = ?, hqa = ?, tax = ?, pa_sistolica = ?,
+            pa_diastolica = ?, fc = ?, sat = ?, doencas_preexistentes = ?, alergias = ?,
+            medicamentos_em_uso = ?, observacoes = ?
         WHERE id = ?
     """, (
         atendimento.nome, atendimento.login, atendimento.gestor, atendimento.turno,
         atendimento.setor, atendimento.processo, atendimento.tenure,
-        atendimento.queixa_principal, atendimento.hqa, atendimento.tax, atendimento.pa,
-        atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
+        atendimento.queixas_principais, atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
+        atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
         atendimento.alergias, atendimento.medicamentos_em_uso,
         atendimento.observacoes, atendimento.id
     ))
@@ -246,12 +246,12 @@ def update_atendimento(atendimento: Atendimento):
         cursor.execute("""
             INSERT INTO condutas (
                 atendimento_id, hipotese_diagnostica, conduta_adotada, resumo_conduta,
-                medicamento_administrado, medicamento, posologia, horario_medicao,
+                medicamento_administrado, posologia, horario_medicacao,
                 observacoes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             atendimento.id, conduta.hipotese_diagnostica, conduta.conduta_adotada,
-            conduta.resumo_conduta, conduta.medicamento_administrado, conduta.medicamento,
+            conduta.resumo_conduta, conduta.medicamento_administrado,
             conduta.posologia, conduta.horario_medicacao, conduta.observacoes
         ))
 
@@ -282,14 +282,14 @@ def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
 
     fieldnames = [
         "id_atendimento", "badge_number", "nome", "login", "gestor", "turno", "setor", "processo", "tenure",
-        "queixa_principal", "hqa", "tax", "pa", "fc", "sat", "doencas_preexistentes",
+        "queixas_principais", "hqa", "tax", "pa_sistolica", "pa_diastolica", "fc", "sat", "doencas_preexistentes",
         "alergias", "medicamentos_em_uso", "observacoes_atendimento", "data_atendimento",
         "hora_atendimento", "semana_iso", "id_conduta", "hipotese_diagnostica",
-        "conduta_adotada", "resumo_conduta", "medicamento_administrado", "medicamento",
-        "posologia", "horario_medicao", "observacoes_conduta"
+        "conduta_adotada", "resumo_conduta", "medicamento_administrado",
+        "posologia", "horario_medicacao", "observacoes_conduta"
     ]
 
-    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+    with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(fieldnames)
 

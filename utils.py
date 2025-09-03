@@ -3,6 +3,7 @@ utils.py
 --------
 Funções utilitárias para a interface gráfica e validação.
 """
+import tkinter as tk
 from tkinter import ttk
 
 def setup_placeholder(widget, placeholder_text):
@@ -22,7 +23,7 @@ def setup_placeholder(widget, placeholder_text):
 
     def on_focus_in(event):
         # Remove o placeholder e restaura o estilo original
-        if widget.get() == placeholder_text:
+        if widget.get() == placeholder_text and widget.cget("style").startswith("Placeholder"):
             widget.delete(0, 'end')
             widget.configure(style="")
 
@@ -42,4 +43,3 @@ def setup_placeholder(widget, placeholder_text):
             if widget.get() != placeholder_text:
                 widget.configure(style="")
         widget.bind('<<ComboboxSelected>>', on_combobox_selected)
-

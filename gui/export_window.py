@@ -18,19 +18,26 @@ class ExportWindow(tk.Toplevel):
         
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill="both", expand=True)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+
+        self.placeholders = {}
 
         self.periodo_var = tk.StringVar(value="hoje")
         
-        # Opções de período
         ttk.Label(main_frame, text="Selecione o período para exportar:", font=("Arial", 12)).pack(pady=10)
         
         ttk.Radiobutton(main_frame, text="Dia Atual", variable=self.periodo_var, value="hoje").pack(anchor="w", padx=20)
         ttk.Radiobutton(main_frame, text="Semana ISO", variable=self.periodo_var, value="semana").pack(anchor="w", padx=20)
         
-        self.semana_entry = ttk.Entry(main_frame, width=10)
-        utils.setup_placeholder(self.semana_entry, "Ex: 25")
-        self.semana_entry.pack(padx=30, anchor="w", pady=5)
+        semana_frame = ttk.Frame(main_frame)
+        semana_frame.pack(fill="x", padx=30)
+        semana_frame.columnconfigure(0, weight=1)
+        self.semana_entry = ttk.Entry(semana_frame)
+        self.semana_entry.pack(side="left", padx=5)
         self.semana_entry.bind("<FocusIn>", lambda e: self.periodo_var.set("semana"))
+        self.placeholders["semana_entry"] = "Ex: 25"
+        utils.setup_placeholder(self.semana_entry, self.placeholders["semana_entry"])
 
         ttk.Radiobutton(main_frame, text="Últimos 30 dias", variable=self.periodo_var, value="30dias").pack(anchor="w", padx=20)
         ttk.Radiobutton(main_frame, text="Período personalizado", variable=self.periodo_var, value="personalizado").pack(anchor="w", padx=20)
@@ -40,15 +47,17 @@ class ExportWindow(tk.Toplevel):
         
         ttk.Label(self.custom_frame, text="Início (YYYY-MM-DD):").pack(side="left", padx=5)
         self.start_date_entry = ttk.Entry(self.custom_frame, width=15)
-        utils.setup_placeholder(self.start_date_entry, "YYYY-MM-DD")
         self.start_date_entry.pack(side="left", padx=5)
         self.start_date_entry.bind("<FocusIn>", lambda e: self.periodo_var.set("personalizado"))
+        self.placeholders["start_date_entry"] = "YYYY-MM-DD"
+        utils.setup_placeholder(self.start_date_entry, self.placeholders["start_date_entry"])
         
         ttk.Label(self.custom_frame, text="Fim (YYYY-MM-DD):").pack(side="left", padx=5)
         self.end_date_entry = ttk.Entry(self.custom_frame, width=15)
-        utils.setup_placeholder(self.end_date_entry, "YYYY-MM-DD")
         self.end_date_entry.pack(side="left", padx=5)
         self.end_date_entry.bind("<FocusIn>", lambda e: self.periodo_var.set("personalizado"))
+        self.placeholders["end_date_entry"] = "YYYY-MM-DD"
+        utils.setup_placeholder(self.end_date_entry, self.placeholders["end_date_entry"])
         
         ttk.Button(main_frame, text="Gerar CSV", command=self.generate_csv).pack(pady=20)
 
@@ -62,7 +71,11 @@ class ExportWindow(tk.Toplevel):
             end_date = start_date
         elif periodo == "semana":
             try:
-                week_iso = int(self.semana_entry.get())
+                week_iso_str = self.semana_entry.get()
+                if week_iso_str == self.placeholders["semana_entry"]:
+                    messagebox.showerror("Erro de Formato", "Por favor, insira um número de semana ISO válido.")
+                    return
+                week_iso = int(week_iso_str)
             except ValueError:
                 messagebox.showerror("Erro de Formato", "Por favor, insira um número de semana ISO válido.")
                 return
@@ -72,6 +85,9 @@ class ExportWindow(tk.Toplevel):
         elif periodo == "personalizado":
             start_date = self.start_date_entry.get()
             end_date = self.end_date_entry.get()
+            if start_date == self.placeholders["start_date_entry"] or end_date == self.placeholders["end_date_entry"]:
+                messagebox.showerror("Erro de Formato", "Por favor, insira as datas no formato YYYY-MM-DD.")
+                return
             try:
                 datetime.strptime(start_date, "%Y-%m-%d")
                 datetime.strptime(end_date, "%Y-%m-%d")
