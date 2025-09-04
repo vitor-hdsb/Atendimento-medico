@@ -283,6 +283,19 @@ def update_atendimento(atendimento: Atendimento):
         if conn:
             conn.close()
 
+def delete_atendimento(atendimento_id: int):
+    """Apaga um atendimento do banco de dados pelo seu ID."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        conn.execute("PRAGMA journal_mode = WAL;")
+        cursor = conn.cursor()
+        # A exclusão em cascata (ON DELETE CASCADE) cuidará da tabela de condutas
+        cursor.execute("DELETE FROM atendimentos WHERE id = ?", (atendimento_id,))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
 
 def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
     """Exporta os dados de atendimentos e condutas para um arquivo CSV."""

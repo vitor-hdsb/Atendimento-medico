@@ -8,7 +8,7 @@ import gui.main_window as main_window
 
 def main():
     """Função principal para iniciar a aplicação."""
-    # 1. Inicializa o banco de dados
+    # 1. Inicializa o banc  o de dados
     db.init_db()
     
     # 2. Cria a janela principal da aplicação

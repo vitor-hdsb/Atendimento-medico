@@ -31,7 +31,7 @@ class Atendimento:
                  data_atendimento: Optional[str] = None,
                  hora_atendimento: Optional[str] = None,
                  semana_iso: Optional[int] = None,
-                 id: Optional[int] = None):
+                 id: Optional[int] = None, **kwargs): # Aceita kwargs para ignorar extras
         self.id = id
         self.badge_number = badge_number
         self.nome = nome
@@ -66,7 +66,7 @@ class Conduta:
                  medicamento_administrado: str = "N/A",
                  posologia: str = "N/A",
                  horario_medicacao: str = "N/A",
-                 observacoes: str = "N/A"):
+                 observacoes: str = "N/A", **kwargs): # Aceita kwargs para ignorar extras
         self.hipotese_diagnostica = hipotese_diagnostica
         self.conduta_adotada = conduta_adotada
         self.resumo_conduta = resumo_conduta
