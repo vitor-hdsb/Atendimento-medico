@@ -206,8 +206,7 @@ def get_last_atendimento_by_badge(badge_number):
 
 def get_atendimentos_by_badge(badge_number=None, days_ago=15):
     """
-    Busca atendimentos recentes para um paciente.
-    Se o crachá não for especificado, busca todos os atendimentos recentes.
+    Busca atendimentos recentes para um paciente por período em dias.
     """
     conn = None
     try:
@@ -222,6 +221,34 @@ def get_atendimentos_by_badge(badge_number=None, days_ago=15):
             SELECT id, badge_number, nome, login, data_atendimento, hora_atendimento
             FROM atendimentos
             WHERE data_atendimento >= ?
+        """
+        
+        if badge_number is not None:
+            query_str += " AND badge_number = ?"
+            query_params.append(badge_number)
+        
+        query_str += " ORDER BY data_atendimento DESC, hora_atendimento DESC"
+        
+        cursor.execute(query_str, query_params)
+        
+        result = cursor.fetchall()
+        return result
+    finally:
+        if conn:
+            conn.close()
+
+def get_atendimentos_by_datetime_range(start_datetime_str, end_datetime_str, badge_number=None):
+    """Busca atendimentos dentro de um intervalo de data e hora."""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        query_params = [start_datetime_str, end_datetime_str]
+        query_str = """
+            SELECT id, badge_number, nome, login, data_atendimento, hora_atendimento
+            FROM atendimentos
+            WHERE (data_atendimento || ' ' || hora_atendimento) BETWEEN ? AND ?
         """
         
         if badge_number is not None:
@@ -347,3 +374,4 @@ def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
     finally:
         if conn:
             conn.close()
+
