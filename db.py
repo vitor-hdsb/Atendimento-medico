@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import csv
 from models import Atendimento, Conduta
 import os
+import json # Importado para lidar com listas de queixas
+from gui.constants import SINTOMAS, REGIOES # Importa as listas de constantes
 
 # Define o nome do arquivo do banco de dados
 DB_FILE = "atendimentos.db"
@@ -21,7 +23,7 @@ def init_db():
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
 
-        # Tabela para os atendimentos
+        # Tabela para os atendimentos (MODIFICADA)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS atendimentos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +35,12 @@ def init_db():
                 setor TEXT,
                 processo TEXT,
                 tenure TEXT,
-                queixas_principais TEXT,
+                
+                qp_sintoma TEXT,
+                qp_regiao TEXT,
+                qs_sintomas TEXT,
+                qs_regioes TEXT,
+                
                 hqa TEXT,
                 tax TEXT,
                 pa_sistolica TEXT,
@@ -50,13 +57,12 @@ def init_db():
             )
         """)
 
-        # Tabela para as condutas, com chave estrangeira para atendimentos
+        # Tabela para as condutas, com chave estrangeira para atendimentos (MODIFICADA)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS condutas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 atendimento_id INTEGER NOT NULL,
                 hipotese_diagnostica TEXT,
-                conduta_adotada TEXT,
                 resumo_conduta TEXT,
                 medicamento_administrado TEXT,
                 posologia TEXT,
@@ -65,6 +71,32 @@ def init_db():
                 FOREIGN KEY (atendimento_id) REFERENCES atendimentos (id) ON DELETE CASCADE
             )
         """)
+        
+        # --- Verificação de colunas antigas (Migração Simples) ---
+        # Tenta remover 'queixas_principais' de 'atendimentos' se existir
+        try:
+            cursor.execute("ALTER TABLE atendimentos DROP COLUMN queixas_principais")
+            print("Coluna 'queixas_principais' removida de 'atendimentos'.")
+        except sqlite3.OperationalError:
+            pass # Coluna não existe ou erro (ignora)
+
+        # Tenta remover 'conduta_adotada' de 'condutas' se existir
+        try:
+            cursor.execute("ALTER TABLE condutas DROP COLUMN conduta_adotada")
+            print("Coluna 'conduta_adotada' removida de 'condutas'.")
+        except sqlite3.OperationalError:
+            pass # Coluna não existe ou erro (ignora)
+        
+        # Tenta adicionar novas colunas de queixa se não existirem
+        try:
+            cursor.execute("ALTER TABLE atendimentos ADD COLUMN qp_sintoma TEXT")
+            cursor.execute("ALTER TABLE atendimentos ADD COLUMN qp_regiao TEXT")
+            cursor.execute("ALTER TABLE atendimentos ADD COLUMN qs_sintomas TEXT")
+            cursor.execute("ALTER TABLE atendimentos ADD COLUMN qs_regioes TEXT")
+            print("Novas colunas de queixa adicionadas a 'atendimentos'.")
+        except sqlite3.OperationalError:
+            pass # Colunas já existem (ignora)
+
         conn.commit()
     finally:
         if conn:
@@ -78,34 +110,36 @@ def save_atendimento(atendimento: Atendimento):
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
 
-        # Insere o atendimento principal
+        # Insere o atendimento principal (MODIFICADO)
         cursor.execute("""
             INSERT INTO atendimentos (
                 badge_number, nome, login, gestor, turno, setor, processo, tenure,
-                queixas_principais, hqa, tax, pa_sistolica, pa_diastolica, fc, sat, doencas_preexistentes,
+                qp_sintoma, qp_regiao, qs_sintomas, qs_regioes,
+                hqa, tax, pa_sistolica, pa_diastolica, fc, sat, doencas_preexistentes,
                 alergias, medicamentos_em_uso, observacoes, data_atendimento,
                 hora_atendimento, semana_iso
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             atendimento.badge_number, atendimento.nome, atendimento.login, atendimento.gestor,
             atendimento.turno, atendimento.setor, atendimento.processo, atendimento.tenure,
-            atendimento.queixas_principais, atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
+            atendimento.qp_sintoma, atendimento.qp_regiao, atendimento.qs_sintomas, atendimento.qs_regioes,
+            atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
             atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
             atendimento.alergias, atendimento.medicamentos_em_uso, atendimento.observacoes,
             atendimento.data_atendimento, atendimento.hora_atendimento, atendimento.semana_iso
         ))
         atendimento_id = cursor.lastrowid
 
-        # Insere todas as condutas associadas
+        # Insere todas as condutas associadas (MODIFICADO)
         for conduta in atendimento.condutas:
             cursor.execute("""
                 INSERT INTO condutas (
-                    atendimento_id, hipotese_diagnostica, conduta_adotada, resumo_conduta,
+                    atendimento_id, hipotese_diagnostica, resumo_conduta,
                     medicamento_administrado, posologia, horario_medicacao,
                     observacoes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                atendimento_id, conduta.hipotese_diagnostica, conduta.conduta_adotada,
+                atendimento_id, conduta.hipotese_diagnostica,
                 conduta.resumo_conduta, conduta.medicamento_administrado,
                 conduta.posologia, conduta.horario_medicacao, conduta.observacoes
             ))
@@ -125,7 +159,7 @@ def get_atendimento_by_id(atendimento_id):
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
 
-        # Busca o atendimento
+        # Busca o atendimento (MODIFICADO)
         cursor.execute("SELECT * FROM atendimentos WHERE id = ?", (atendimento_id,))
         atendimento_data = cursor.fetchone()
         if not atendimento_data:
@@ -141,34 +175,36 @@ def get_atendimento_by_id(atendimento_id):
             setor=atendimento_data[6],
             processo=atendimento_data[7],
             tenure=atendimento_data[8],
-            queixas_principais=atendimento_data[9],
-            hqa=atendimento_data[10],
-            tax=atendimento_data[11],
-            pa_sistolica=atendimento_data[12],
-            pa_diastolica=atendimento_data[13],
-            fc=atendimento_data[14],
-            sat=atendimento_data[15],
-            doencas_preexistentes=atendimento_data[16],
-            alergias=atendimento_data[17],
-            medicamentos_em_uso=atendimento_data[18],
-            observacoes=atendimento_data[19],
-            data_atendimento=atendimento_data[20],
-            hora_atendimento=atendimento_data[21],
-            semana_iso=atendimento_data[22]
+            qp_sintoma=atendimento_data[9],
+            qp_regiao=atendimento_data[10],
+            qs_sintomas=atendimento_data[11],
+            qs_regioes=atendimento_data[12],
+            hqa=atendimento_data[13],
+            tax=atendimento_data[14],
+            pa_sistolica=atendimento_data[15],
+            pa_diastolica=atendimento_data[16],
+            fc=atendimento_data[17],
+            sat=atendimento_data[18],
+            doencas_preexistentes=atendimento_data[19],
+            alergias=atendimento_data[20],
+            medicamentos_em_uso=atendimento_data[21],
+            observacoes=atendimento_data[22],
+            data_atendimento=atendimento_data[23],
+            hora_atendimento=atendimento_data[24],
+            semana_iso=atendimento_data[25]
         )
 
-        # Busca as condutas associadas
+        # Busca as condutas associadas (MODIFICADO)
         cursor.execute("SELECT * FROM condutas WHERE atendimento_id = ?", (atendimento_id,))
         condutas_data = cursor.fetchall()
         atendimento.condutas = [
             Conduta(
                 hipotese_diagnostica=c[2],
-                conduta_adotada=c[3],
-                resumo_conduta=c[4],
-                medicamento_administrado=c[5],
-                posologia=c[6],
-                horario_medicacao=c[7],
-                observacoes=c[8]
+                resumo_conduta=c[3],
+                medicamento_administrado=c[4],
+                posologia=c[5],
+                horario_medicacao=c[6],
+                observacoes=c[7]
             ) for c in condutas_data
         ]
 
@@ -184,7 +220,8 @@ def get_last_atendimento_by_badge(badge_number):
         conn = sqlite3.connect(DB_FILE)
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM atendimentos WHERE badge_number = ? ORDER BY data_atendimento DESC, hora_atendimento DESC LIMIT 1", (badge_number,))
+        # Seleciona apenas campos de identificação (não afetado pelas mudanças)
+        cursor.execute("SELECT id, badge_number, nome, login, gestor, turno, setor, processo, tenure FROM atendimentos WHERE badge_number = ? ORDER BY data_atendimento DESC, hora_atendimento DESC LIMIT 1", (badge_number,))
         atendimento_data = cursor.fetchone()
         if atendimento_data:
             return Atendimento(
@@ -207,6 +244,7 @@ def get_last_atendimento_by_badge(badge_number):
 def get_atendimentos_by_badge(badge_number=None, days_ago=15):
     """
     Busca atendimentos recentes para um paciente por período em dias.
+    (Não afetado pelas mudanças)
     """
     conn = None
     try:
@@ -238,7 +276,10 @@ def get_atendimentos_by_badge(badge_number=None, days_ago=15):
             conn.close()
 
 def get_atendimentos_by_datetime_range(start_datetime_str, end_datetime_str, badge_number=None):
-    """Busca atendimentos dentro de um intervalo de data e hora."""
+    """
+    Busca atendimentos dentro de um intervalo de data e hora.
+    (Não afetado pelas mudanças)
+    """
     conn = None
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -273,34 +314,37 @@ def update_atendimento(atendimento: Atendimento):
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
 
-        # Atualiza o atendimento principal
+        # Atualiza o atendimento principal (MODIFICADO)
         cursor.execute("""
             UPDATE atendimentos SET
                 nome = ?, login = ?, gestor = ?, turno = ?, setor = ?, processo = ?,
-                tenure = ?, queixas_principais = ?, hqa = ?, tax = ?, pa_sistolica = ?,
+                tenure = ?, 
+                qp_sintoma = ?, qp_regiao = ?, qs_sintomas = ?, qs_regioes = ?,
+                hqa = ?, tax = ?, pa_sistolica = ?,
                 pa_diastolica = ?, fc = ?, sat = ?, doencas_preexistentes = ?, alergias = ?,
                 medicamentos_em_uso = ?, observacoes = ?
             WHERE id = ?
         """, (
             atendimento.nome, atendimento.login, atendimento.gestor, atendimento.turno,
             atendimento.setor, atendimento.processo, atendimento.tenure,
-            atendimento.queixas_principais, atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
+            atendimento.qp_sintoma, atendimento.qp_regiao, atendimento.qs_sintomas, atendimento.qs_regioes,
+            atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
             atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
             atendimento.alergias, atendimento.medicamentos_em_uso,
             atendimento.observacoes, atendimento.id
         ))
 
-        # Remove as condutas antigas e insere as novas
+        # Remove as condutas antigas e insere as novas (MODIFICADO)
         cursor.execute("DELETE FROM condutas WHERE atendimento_id = ?", (atendimento.id,))
         for conduta in atendimento.condutas:
             cursor.execute("""
                 INSERT INTO condutas (
-                    atendimento_id, hipotese_diagnostica, conduta_adotada, resumo_conduta,
+                    atendimento_id, hipotese_diagnostica, resumo_conduta,
                     medicamento_administrado, posologia, horario_medicacao,
                     observacoes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                atendimento.id, conduta.hipotese_diagnostica, conduta.conduta_adotada,
+                atendimento.id, conduta.hipotese_diagnostica,
                 conduta.resumo_conduta, conduta.medicamento_administrado,
                 conduta.posologia, conduta.horario_medicacao, conduta.observacoes
             ))
@@ -329,6 +373,7 @@ def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
     conn = None
     try:
         conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row # Permite acessar colunas por nome
         conn.execute("PRAGMA journal_mode = WAL;")
         cursor = conn.cursor()
 
@@ -341,37 +386,104 @@ def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
         elif week_iso:
             query_str += " AND semana_iso = ?"
             query_params.append(week_iso)
-        else: # Dia atual
-            query_str += " AND data_atendimento = ?"
-            query_params.append(datetime.now().strftime("%Y-%m-%d"))
+        elif start_date: # Lógica para "hoje"
+             query_str += " AND data_atendimento = ?"
+             query_params.append(start_date)
+        # else: exporta tudo
 
         cursor.execute(query_str, query_params)
         atendimentos = cursor.fetchall()
 
-        fieldnames = [
+        # --- Geração Dinâmica de Cabeçalhos ---
+        
+        # 1. Campos Padrão de Atendimento
+        fieldnames_atendimento = [
             "id_atendimento", "badge_number", "nome", "login", "gestor", "turno", "setor", "processo", "tenure",
-            "queixas_principais", "hqa", "tax", "pa_sistolica", "pa_diastolica", "fc", "sat", "doencas_preexistentes",
+            "qp_sintoma", "qp_regiao", # Novas queixas principais
+            "hqa", "tax", "pa_sistolica", "pa_diastolica", "fc", "sat", "doencas_preexistentes",
             "alergias", "medicamentos_em_uso", "observacoes_atendimento", "data_atendimento",
-            "hora_atendimento", "semana_iso", "id_conduta", "hipotese_diagnostica",
-            "conduta_adotada", "resumo_conduta", "medicamento_administrado",
+            "hora_atendimento", "semana_iso"
+        ]
+        
+        # 2. Campos One-Hot para QS_Sintomas
+        # Remove "N/A" da lista de colunas
+        sintomas_cols = [s for s in SINTOMAS if s != "N/A"]
+        fieldnames_qs_sintomas = [f"qs_sintoma_{s.replace(' ', '_').replace('/', '_')}" for s in sintomas_cols]
+        
+        # 3. Campos One-Hot para QS_Regioes
+        # Remove "N/A" da lista de colunas
+        regioes_cols = [r for r in REGIOES if r != "N/A"]
+        fieldnames_qs_regioes = [f"qs_regiao_{r.replace(' ', '_').replace('/', '_')}" for r in regioes_cols]
+
+        # 4. Campos Padrão de Conduta
+        fieldnames_conduta = [
+            "id_conduta", "hipotese_diagnostica",
+            "resumo_conduta", "medicamento_administrado",
             "posologia", "horario_medicacao", "observacoes_conduta"
         ]
+        
+        # 5. Combina todos os cabeçalhos
+        fieldnames = fieldnames_atendimento + fieldnames_qs_sintomas + fieldnames_qs_regioes + fieldnames_conduta
+        # --- Fim da Geração de Cabeçalhos ---
+
 
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(fieldnames)
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
 
-            for row in atendimentos:
-                atendimento_id = row[0]
+            for atendimento_row in atendimentos:
+                # 1. Prepara a linha base do atendimento
+                row_base = {}
+                
+                # Mapeia colunas de atendimento
+                for col in fieldnames_atendimento:
+                    if col == "id_atendimento":
+                        row_base[col] = atendimento_row["id"]
+                    elif col == "observacoes_atendimento":
+                         row_base[col] = atendimento_row["observacoes"]
+                    elif col in atendimento_row.keys():
+                        row_base[col] = atendimento_row[col]
+                
+                # 2. Processa QS_Sintomas (One-Hot)
+                try:
+                    sintomas_salvos = json.loads(atendimento_row["qs_sintomas"] or "[]")
+                except json.JSONDecodeError:
+                    sintomas_salvos = []
+                
+                for s in sintomas_cols:
+                    col_name = f"qs_sintoma_{s.replace(' ', '_').replace('/', '_')}"
+                    row_base[col_name] = 1 if s in sintomas_salvos else 0
+
+                # 3. Processa QS_Regioes (One-Hot)
+                try:
+                    regioes_salvas = json.loads(atendimento_row["qs_regioes"] or "[]")
+                except json.JSONDecodeError:
+                    regioes_salvas = []
+
+                for r in regioes_cols:
+                    col_name = f"qs_regiao_{r.replace(' ', '_').replace('/', '_')}"
+                    row_base[col_name] = 1 if r in regioes_salvas else 0
+
+                # 4. Busca e processa condutas
+                atendimento_id = atendimento_row["id"]
                 cursor.execute("SELECT * FROM condutas WHERE atendimento_id = ?", (atendimento_id,))
                 condutas = cursor.fetchall()
+                
                 if not condutas:
                     # Escreve o atendimento principal mesmo sem conduta
-                    writer.writerow(row + (None,) * 10)
+                    writer.writerow(row_base)
                 else:
-                    for conduta in condutas:
-                        writer.writerow(row + conduta[1:])
+                    for conduta_row in condutas:
+                        row_com_conduta = row_base.copy()
+                        row_com_conduta["id_conduta"] = conduta_row["id"]
+                        row_com_conduta["hipotese_diagnostica"] = conduta_row["hipotese_diagnostica"]
+                        row_com_conduta["resumo_conduta"] = conduta_row["resumo_conduta"]
+                        row_com_conduta["medicamento_administrado"] = conduta_row["medicamento_administrado"]
+                        row_com_conduta["posologia"] = conduta_row["posologia"]
+                        row_com_conduta["horario_medicacao"] = conduta_row["horario_medicacao"]
+                        row_com_conduta["observacoes_conduta"] = conduta_row["observacoes"]
+                        
+                        writer.writerow(row_com_conduta)
     finally:
         if conn:
             conn.close()
-

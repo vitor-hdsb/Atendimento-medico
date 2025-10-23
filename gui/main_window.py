@@ -4,9 +4,11 @@ from datetime import datetime, timedelta
 import db
 import utils
 from models import Atendimento, Conduta
-from gui.edit_window import EditWindow, OPTIONS
+from gui.edit_window import EditWindow
 from gui.export_window import ExportWindow
+from gui.constants import OPTIONS, SINTOMAS, REGIOES # Importa constantes
 import sqlite3
+import json # Para salvar listas de queixas
 
 # Constantes para os períodos do filtro
 PERIODO_ESCALA_ATUAL = "Escala Atual"
@@ -24,7 +26,12 @@ class MainWindow(tk.Tk):
         
         self.entries = {}
         self.comboboxes = {}
-        self.queixas_vars = {}
+        # Novos dicts para checkbuttons de queixa secundária
+        self.qs_sintomas_vars = {}
+        self.qs_regioes_vars = {}
+        
+        # Lista para guardar todos os widgets do formulário para habilitar/desabilitar
+        self.form_widgets = [] 
         
         self.create_widgets()
         self.refresh_history_tree()
@@ -35,6 +42,11 @@ class MainWindow(tk.Tk):
         form_frame = ttk.Frame(self, padding="10")
         form_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         form_frame.columnconfigure(1, weight=1)
+        
+        # Frame para os botões Salvar e Limpar
+        button_frame = ttk.Frame(form_frame)
+        button_frame.pack(pady=10)
+
 
         vcmd_int = (self.register(utils.validate_integer_input), '%P')
         vcmd_posologia = (self.register(utils.validate_posologia_input), '%P')
@@ -43,11 +55,12 @@ class MainWindow(tk.Tk):
             "badge_number": "Bipe o crachá", "nome": "Bipe o crachá", "login": "Bipe o crachá",
             "gestor": "Selecione", "turno": "Bipe o crachá ou selecione", "setor": "Bipe o crachá ou selecione",
             "processo": "Selecione", "tenure": "Bipe o crachá",
+            "qp_sintoma": "Selecione", "qp_regiao": "Selecione",
             "hqa": "Detalhe a queixa...", "tax": "Ex: 38", "pa_sistolica": "120", "pa_diastolica": "80",
             "fc": "Ex: 90", "sat": "Ex: 95",
             "doencas_preexistentes": "Ex: Diabetes, Hipertensão...", "alergias": "Ex: Dipirona, AAS...",
             "medicamentos_em_uso": "Ex: Losartana, Metformina...", "observacoes": "(Campo livre)",
-            "hipotese_diagnostica": "Ex: Enxaqueca, ansiedade...", "conduta_adotada": "Descreva a conduta...",
+            "hipotese_diagnostica": "Ex: Enxaqueca, ansiedade...", 
             "resumo_conduta": "Selecione", "medicamento_administrado": "Selecione",
             "posologia": "Ex: 1 comp, 15 gotas", "horario_medicao": "HH:MM", "conduta_obs": "(Campo livre)"
         }
@@ -58,6 +71,8 @@ class MainWindow(tk.Tk):
         conduta_frame = self.create_section_frame(form_frame, "Conduta de Enfermagem")
 
         # --- Campos de Identificação ---
+        # Note: Esses widgets NÃO são adicionados a self.form_widgets aqui,
+        # pois não precisam ser desabilitados pelas regras "Absorvente"/"Trabalho em altura"
         self.create_entry_field(id_frame, "Badge Number:", "badge_number", 0, 0, vcmd_int)
         self.create_entry_field(id_frame, "Nome:", "nome", 0, 1)
         self.create_entry_field(id_frame, "Login:", "login", 1, 0)
@@ -68,32 +83,48 @@ class MainWindow(tk.Tk):
         self.create_entry_field(id_frame, "Tenure:", "tenure", 3, 1)
         self.entries['badge_number'].bind("<KeyRelease>", self.on_badge_number_change)
 
-        # --- Campos de Anamnese ---
-        self.create_queixa_section(anamnese_frame)
-        self.create_entry_field(anamnese_frame, "HQA:", "hqa", 1, 0, columnspan=3)
-        self.create_entry_field(anamnese_frame, "TAX:", "tax", 2, 0)
-        self.create_pa_section(anamnese_frame, 2, 1)
-        self.create_entry_field(anamnese_frame, "FC:", "fc", 3, 0)
-        self.create_entry_field(anamnese_frame, "SAT:", "sat", 3, 1)
-        self.create_entry_field(anamnese_frame, "Doenças pré-existentes:", "doencas_preexistentes", 4, 0, columnspan=3)
-        self.create_entry_field(anamnese_frame, "Alergias:", "alergias", 5, 0, columnspan=3)
-        self.create_entry_field(anamnese_frame, "Medicamentos em uso:", "medicamentos_em_uso", 6, 0, columnspan=3)
-        self.create_entry_field(anamnese_frame, "Observações:", "observacoes", 7, 0, columnspan=3)
+        # --- Campos de Anamnese (MODIFICADO) ---
+        self.create_queixa_section(anamnese_frame) # Nova seção de queixas
+        self.create_entry_field(anamnese_frame, "HQA:", "hqa", 2, 0, columnspan=3, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "TAX:", "tax", 3, 0, add_to_form_widgets=True) # Mudou row
+        self.create_pa_section(anamnese_frame, 3, 1) # Mudou row
+        self.create_entry_field(anamnese_frame, "FC:", "fc", 4, 0, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "SAT:", "sat", 4, 1, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "Doenças pré-existentes:", "doencas_preexistentes", 5, 0, columnspan=3, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "Alergias:", "alergias", 6, 0, columnspan=3, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "Medicamentos em uso:", "medicamentos_em_uso", 7, 0, columnspan=3, add_to_form_widgets=True) # Mudou row
+        self.create_entry_field(anamnese_frame, "Observações:", "observacoes", 8, 0, columnspan=3, add_to_form_widgets=True) # Mudou row
 
-        # --- Campos de Conduta ---
-        self.create_combobox_field(conduta_frame, "Ocupacional:", "ocupacional", OPTIONS["ocupacional"], 0, 0)
-        self.create_entry_field(conduta_frame, "Hipótese:", "hipotese_diagnostica", 0, 1)
-        self.create_entry_field(conduta_frame, "Conduta:", "conduta_adotada", 1, 0, columnspan=3)
-        self.create_combobox_field(conduta_frame, "Resumo:", "resumo_conduta", OPTIONS["resumo_conduta"], 2, 0)
-        self.create_combobox_field(conduta_frame, "Medicação:", "medicamento_administrado", OPTIONS["medicamento_admin"], 2, 1)
-        self.create_entry_field(conduta_frame, "Posologia:", "posologia", 3, 0, vcmd=vcmd_posologia)
-        self.create_horario_field(conduta_frame, "Horário:", "horario_medicao", 3, 1)
-        self.create_entry_field(conduta_frame, "Obs:", "conduta_obs", 4, 0, columnspan=3)
+        # --- Campos de Conduta (MODIFICADO) ---
+        self.create_entry_field(conduta_frame, "Hipótese:", "hipotese_diagnostica", 0, 1, add_to_form_widgets=True)
+        self.create_combobox_field(conduta_frame, "Resumo:", "resumo_conduta", OPTIONS["resumo_conduta"], 2, 0, add_to_form_widgets=True) # Atualizado
+        self.create_combobox_field(conduta_frame, "Medicação:", "medicamento_administrado", OPTIONS["medicamento_admin"], 2, 1, add_to_form_widgets=True)
+        self.create_entry_field(conduta_frame, "Posologia:", "posologia", 3, 0, vcmd=vcmd_posologia, add_to_form_widgets=True)
+        self.create_horario_field(conduta_frame, "Horário:", "horario_medicao", 3, 1) # Adiciona à lista dentro da função
+        self.create_entry_field(conduta_frame, "Obs:", "conduta_obs", 4, 0, columnspan=3, add_to_form_widgets=True)
         
-        ttk.Button(form_frame, text="Salvar Atendimento", command=self.save_atendimento).pack(pady=10)
+        # --- Lógica de Habilitar/Desabilitar ---
+        # Widgets que permanecem ativos para "Trabalho em altura"
+        self.trabalho_altura_exceptions = {
+            self.entries["pa_sistolica"],
+            self.entries["pa_diastolica"],
+            self.comboboxes["resumo_conduta"]
+        }
+        
+        # --- CORREÇÃO: Excluir qp_sintoma da lista self.form_widgets ---
+        # A lista é populada nas funções create_*, então removemos qp_sintoma após a criação
+        if self.comboboxes.get("qp_sintoma") in self.form_widgets:
+            self.form_widgets.remove(self.comboboxes.get("qp_sintoma"))
+            
+        # Vincula a função de mudança
+        self.comboboxes["qp_sintoma"].bind("<<ComboboxSelected>>", self.on_qp_sintoma_change)
+
+        # Adiciona botões ao button_frame
+        ttk.Button(button_frame, text="Salvar Atendimento", command=self.save_atendimento).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Limpar Campos", command=lambda: self.clear_form(clear_all=True)).pack(side=tk.LEFT, padx=5) # Botão Limpar
         
         self.create_history_section()
-        self.clear_form()
+        self.clear_form() # Chama clear_form sem argumentos inicialmente
 
     def create_section_frame(self, parent, text):
         frame = ttk.LabelFrame(parent, text=text, padding="10")
@@ -101,19 +132,27 @@ class MainWindow(tk.Tk):
         frame.columnconfigure(1, weight=1); frame.columnconfigure(3, weight=1)
         return frame
 
-    def create_entry_field(self, parent, label, name, r, c, vcmd=None, columnspan=1):
+    # Modificado para adicionar widget à lista se add_to_form_widgets=True
+    def create_entry_field(self, parent, label, name, r, c, vcmd=None, columnspan=1, add_to_form_widgets=False):
         ttk.Label(parent, text=label).grid(row=r, column=c*2, padx=5, pady=2, sticky="w")
         entry = ttk.Entry(parent, validate="key", validatecommand=vcmd)
         entry.grid(row=r, column=c*2+1, padx=5, pady=2, sticky="ew", columnspan=columnspan)
         self.entries[name] = entry
         utils.setup_placeholder(entry, self.placeholders.get(name, ""))
+        if add_to_form_widgets:
+            self.form_widgets.append(entry)
+        return entry
 
-    def create_combobox_field(self, parent, label, name, opts, r, c):
+    # Modificado para adicionar widget à lista se add_to_form_widgets=True
+    def create_combobox_field(self, parent, label, name, opts, r, c, add_to_form_widgets=False):
         ttk.Label(parent, text=label).grid(row=r, column=c*2, padx=5, pady=2, sticky="w")
-        combo = ttk.Combobox(parent, values=opts)
+        combo = ttk.Combobox(parent, values=opts, state="readonly")
         combo.grid(row=r, column=c*2+1, padx=5, pady=2, sticky="ew")
         self.comboboxes[name] = combo
         utils.setup_placeholder(combo, self.placeholders.get(name, ""))
+        if add_to_form_widgets:
+            self.form_widgets.append(combo)
+        return combo
 
     def create_horario_field(self, parent, label, name, r, c):
         ttk.Label(parent, text=label).grid(row=r, column=c*2, padx=5, pady=2, sticky="w")
@@ -121,30 +160,85 @@ class MainWindow(tk.Tk):
         frame.grid(row=r, column=c*2+1, padx=5, pady=2, sticky="ew")
         entry = ttk.Entry(frame); entry.pack(side="left", fill="x", expand=True)
         self.entries[name] = entry
+        self.form_widgets.append(entry) # Adiciona à lista
         utils.setup_placeholder(entry, self.placeholders.get(name, ""))
-        ttk.Button(frame, text="Agora", command=self.set_current_time).pack(side="left", padx=5)
+        btn_agora = ttk.Button(frame, text="Agora", command=self.set_current_time)
+        btn_agora.pack(side="left", padx=5)
+        self.form_widgets.append(btn_agora) # Adiciona o botão também
 
     def create_queixa_section(self, parent):
-        ttk.Label(parent, text="Queixa principal:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        frame = ttk.Frame(parent)
-        frame.grid(row=0, column=1, columnspan=3, padx=5, pady=2, sticky="ew")
-        
-        for queixa in ["Dor de cabeça", "Enjoo", "Tontura", "Fraqueza", "Outros"]:
-            var = tk.BooleanVar(); self.queixas_vars[queixa] = var
-            chk = ttk.Checkbutton(frame, text=queixa, variable=var, command=lambda q=queixa: self.toggle_other_queixa(q))
-            chk.pack(side="left", padx=2)
+        # Frame principal para todas as queixas
+        queixa_frame = ttk.Frame(parent)
+        queixa_frame.grid(row=0, column=0, columnspan=4, sticky="ew", pady=5)
+        queixa_frame.columnconfigure(1, weight=1)
+        queixa_frame.columnconfigure(3, weight=1)
 
-        self.queixa_outros_entry = ttk.Entry(frame, state="disabled")
-        self.queixa_outros_entry.pack(side="left", fill="x", expand=True, padx=2)
-        utils.setup_placeholder(self.queixa_outros_entry, "Outra queixa...")
+        # --- Queixa Principal (Seleção Única) ---
+        ttk.Label(queixa_frame, text="QP Sintoma:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        # Adiciona qp_sintoma à lista form_widgets, será removido depois em create_widgets
+        combo_qp_sintoma = self.create_combobox_field(queixa_frame, "", "qp_sintoma", SINTOMAS, 0, 0, add_to_form_widgets=True)
+        combo_qp_sintoma.grid(row=0, column=1, sticky="ew")
+        
+        ttk.Label(queixa_frame, text="QP Região:").grid(row=0, column=2, padx=5, pady=2, sticky="w")
+        # Adiciona qp_regiao à lista form_widgets
+        combo_qp_regiao = self.create_combobox_field(queixa_frame, "", "qp_regiao", REGIOES, 0, 1, add_to_form_widgets=True)
+        combo_qp_regiao.grid(row=0, column=3, sticky="ew")
+
+
+        # --- Queixa Secundária (Múltipla Seleção) ---
+        ttk.Label(queixa_frame, text="QS Sintomas:", font=("Arial", 10, "bold")).grid(row=1, column=0, padx=5, pady=(10, 2), sticky="nw")
+        self.qs_sintomas_vars = self._create_checkable_frame(queixa_frame, SINTOMAS, 1, 1)
+        
+        ttk.Label(queixa_frame, text="QS Regiões:", font=("Arial", 10, "bold")).grid(row=1, column=2, padx=5, pady=(10, 2), sticky="nw")
+        self.qs_regioes_vars = self._create_checkable_frame(queixa_frame, REGIOES, 1, 3)
+
+    def _create_checkable_frame(self, parent, options, r, c):
+        """Cria um frame com scroll e checkbuttons para uma lista de opções."""
+        frame = ttk.Frame(parent, borderwidth=1, relief="sunken", height=100)
+        frame.grid(row=r, column=c, sticky="nsew", padx=5, pady=2)
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(frame, height=100)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        vars_dict = {}
+        options_filtered = [opt for opt in options if opt != "N/A"]
+        
+        for i, option in enumerate(options_filtered):
+            var = tk.BooleanVar(value=False)
+            chk = ttk.Checkbutton(scrollable_frame, text=option, variable=var)
+            chk.pack(anchor="w", fill="x", padx=5)
+            vars_dict[option] = var
+            self.form_widgets.append(chk) # Adiciona O WIDGET (Checkbutton) à lista
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        return vars_dict
+
 
     def create_pa_section(self, parent, r, c):
         ttk.Label(parent, text="PA:").grid(row=r, column=c*2, padx=5, pady=2, sticky="w")
         frame = ttk.Frame(parent)
         frame.grid(row=r, column=c*2+1, padx=5, pady=2, sticky="ew")
-        self.entries['pa_sistolica'] = ttk.Entry(frame, width=5); self.entries['pa_sistolica'].pack(side="left")
+        entry_sis = ttk.Entry(frame, width=5); entry_sis.pack(side="left")
+        self.entries['pa_sistolica'] = entry_sis
         ttk.Label(frame, text="/").pack(side="left")
-        self.entries['pa_diastolica'] = ttk.Entry(frame, width=5); self.entries['pa_diastolica'].pack(side="left")
+        entry_dia = ttk.Entry(frame, width=5); entry_dia.pack(side="left")
+        self.entries['pa_diastolica'] = entry_dia
+        
+        # Adiciona PA à lista form_widgets
+        self.form_widgets.extend([entry_sis, entry_dia])
+
 
     def create_history_section(self):
         history_frame = ttk.Frame(self); history_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
@@ -173,65 +267,170 @@ class MainWindow(tk.Tk):
             utils.clear_placeholder(entry, self.placeholders.get("horario_medicao", ""))
             entry.delete(0, tk.END)
             entry.insert(0, datetime.now().strftime("%H:%M"))
-
-    def toggle_other_queixa(self, q):
-        if q == "Outros":
-            is_checked = self.queixas_vars["Outros"].get()
-            self.queixa_outros_entry.config(state=tk.NORMAL if is_checked else tk.DISABLED)
-            if not is_checked:
-                utils.clear_placeholder(self.queixa_outros_entry, "Outra queixa...")
-                utils.setup_placeholder(self.queixa_outros_entry, "Outra queixa...")
-            else:
-                utils.remove_placeholder_on_fill(self.queixa_outros_entry, "Outra queixa...")
     
+    def on_qp_sintoma_change(self, event=None):
+        """Habilita/desabilita campos com base na QP selecionada."""
+        sintoma = self.comboboxes["qp_sintoma"].get()
+        
+        # --- CORREÇÃO: Garante que qp_sintoma nunca seja desabilitado ---
+        qp_sintoma_combo = self.comboboxes.get("qp_sintoma")
+
+        if sintoma == "Absorvente":
+            # Desabilita TUDO e preenche N/A
+            for widget in self.form_widgets:
+                 # Pula o próprio combobox qp_sintoma
+                if widget != qp_sintoma_combo:
+                    self.set_widget_state(widget, "disabled", "N/A")
+        
+        elif sintoma == "Trabalho em altura":
+            # Desabilita tudo EXCETO PA e Resumo
+            for widget in self.form_widgets:
+                # Pula o próprio combobox qp_sintoma
+                if widget == qp_sintoma_combo:
+                    continue
+                if widget in self.trabalho_altura_exceptions:
+                    self.set_widget_state(widget, "normal", "") # Habilita exceções
+                else:
+                    self.set_widget_state(widget, "disabled", "N/A") # Desabilita o resto
+        
+        else:
+            # Habilita TUDO
+            for widget in self.form_widgets:
+                # Pula o próprio combobox qp_sintoma
+                if widget != qp_sintoma_combo:
+                    self.set_widget_state(widget, "normal", "")
+
+    def set_widget_state(self, widget, state, fill_value=""):
+        """Define o estado (normal/disabled) e o valor de um widget."""
+        try:
+            # --- CORREÇÃO: Verifica se o widget existe antes de chamar winfo_class ---
+            if not widget or not widget.winfo_exists():
+                return # Ignora se o widget foi destruído
+
+            widget_type = widget.winfo_class()
+            
+            if state == "disabled":
+                if widget_type == "TEntry":
+                    widget.config(state="normal") # Habilita temporariamente para limpar/inserir
+                    widget.delete(0, tk.END)
+                    widget.insert(0, fill_value)
+                    widget.config(state="disabled")
+                elif widget_type == "TCombobox":
+                    # --- CORREÇÃO: Não desabilita se for qp_sintoma ---
+                    if widget == self.comboboxes.get("qp_sintoma"):
+                         widget.set(fill_value) # Apenas define o valor
+                    else:
+                        widget.set(fill_value)
+                        widget.config(state="disabled")
+                elif widget_type == "TCheckbutton":
+                    var_name = widget.cget("variable")
+                    # --- CORREÇÃO: Usa try-except para getvar ---
+                    try:
+                        var = widget.getvar(var_name) # Obtém a variável BooleanVar
+                        if isinstance(var, tk.BooleanVar): # Verifica se é BooleanVar
+                           var.set(False) # Desmarca a variável
+                    except tk.TclError:
+                        pass # Ignora se a variável não puder ser obtida
+                    widget.config(state="disabled") # Desabilita o widget Checkbutton
+                elif widget_type == "TButton": # Trata o botão "Agora"
+                    widget.config(state="disabled")
+            
+            else: # state == "normal"
+                if widget_type == "TEntry":
+                    widget.config(state="normal")
+                    # Limpa N/A se estava desabilitado
+                    if widget.get() == "N/A":
+                        widget.delete(0, tk.END)
+                elif widget_type == "TCombobox":
+                     # --- CORREÇÃO: Sempre readonly para Comboboxes ---
+                    widget.config(state="readonly")
+                    # Limpa N/A se estava desabilitado
+                    if widget.get() == "N/A":
+                        widget.set("")
+                elif widget_type == "TCheckbutton":
+                    widget.config(state="normal")
+                elif widget_type == "TButton":
+                    widget.config(state="normal")
+        except tk.TclError:
+            pass # Ignora o erro silenciosamente
+
     def on_badge_number_change(self, event):
         badge = self.entries['badge_number'].get()
+        # --- CORREÇÃO: Chamar clear_form ANTES de preencher ---
         if not badge:
-            self.clear_form(clear_badge=False)
-        elif last := db.get_last_atendimento_by_badge(badge):
-            self.clear_form(clear_badge=False)
+            # Limpa tudo exceto o badge
+            self.clear_form(clear_badge=False, clear_id_fields=True, restore_placeholders=True)
+            return # Sai da função se o badge estiver vazio
+
+        if last := db.get_last_atendimento_by_badge(badge):
+            # Limpa APENAS os campos que serão preenchidos (exceto badge)
+            self.clear_form(clear_badge=False, clear_id_fields=False, clear_anamnese_conduta=True, restore_placeholders=False)
+            
             fields = {'nome': last.nome, 'login': last.login, 'gestor': last.gestor, 'turno': last.turno,
                       'setor': last.setor, 'processo': last.processo, 'tenure': last.tenure}
             for name, value in fields.items():
                 widget = self.entries.get(name) or self.comboboxes.get(name)
-                utils.clear_placeholder(widget, self.placeholders.get(name));
-                if isinstance(widget, ttk.Combobox): widget.set(value)
-                else: widget.delete(0, tk.END); widget.insert(0, value)
-                utils.remove_placeholder_on_fill(widget, self.placeholders.get(name))
+                if widget:
+                    # Não limpa placeholder aqui, assume que clear_form já tratou
+                    if isinstance(widget, ttk.Combobox): 
+                        # Define o valor apenas se ele existir nas opções
+                        if value in widget['values']:
+                            widget.set(value)
+                        else:
+                            widget.set('') # Limpa se o valor antigo não for válido
+                    else: 
+                        widget.delete(0, tk.END); widget.insert(0, value)
+                    # Remove placeholder se houver valor preenchido
+                    utils.remove_placeholder_on_fill(widget, self.placeholders.get(name))
+        else:
+             # Se não encontrou 'last', limpa campos de ID (exceto badge)
+             self.clear_form(clear_badge=False, clear_id_fields=True, clear_anamnese_conduta=False, restore_placeholders=True)
+
+
         self.refresh_history_tree()
     
     def refresh_history_tree(self, event=None):
         for item in self.history_tree.get_children(): self.history_tree.delete(item)
         
-        badge = self.entries.get('badge_number', tk.Entry()).get()
+        badge_entry = self.entries.get('badge_number')
+        badge = badge_entry.get() if badge_entry else None
         badge = None if not badge or badge == self.placeholders.get("badge_number") else badge
 
         period = self.history_period_var.get()
         
-        if period == PERIODO_ESCALA_ATUAL:
-            now = datetime.now()
-            if 7 <= now.hour < 19: # Turno do dia
-                start_dt = now.replace(hour=7, minute=0, second=0, microsecond=0)
-                end_dt = now.replace(hour=18, minute=59, second=59, microsecond=999999)
-            else: # Turno da noite
-                if now.hour >= 19: # Começou hoje
-                    start_dt = now.replace(hour=19, minute=0, second=0, microsecond=0)
-                    end_dt = (now + timedelta(days=1)).replace(hour=6, minute=59, second=59, microsecond=999999)
-                else: # Termina hoje (começou ontem)
-                    start_dt = (now - timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0)
-                    end_dt = now.replace(hour=6, minute=59, second=59, microsecond=999999)
-            atendimentos = db.get_atendimentos_by_datetime_range(
-                start_dt.strftime("%Y-%m-%d %H:%M:%S"), end_dt.strftime("%Y-%m-%d %H:%M:%S"), badge)
-        else:
-            days = {PERIODO_15_DIAS: 15, PERIODO_30_DIAS: 30, PERIODO_60_DIAS: 60}.get(period, 15)
-            if period == PERIODO_YTD: days = (datetime.now() - datetime.now().replace(month=1, day=1)).days + 1
-            atendimentos = db.get_atendimentos_by_badge(badge, days)
+        atendimentos = [] # Inicializa
+        try:
+            if period == PERIODO_ESCALA_ATUAL:
+                now = datetime.now()
+                if 7 <= now.hour < 19: # Turno do dia
+                    start_dt = now.replace(hour=7, minute=0, second=0, microsecond=0)
+                    end_dt = now.replace(hour=18, minute=59, second=59, microsecond=999999)
+                else: # Turno da noite
+                    if now.hour >= 19: # Começou hoje
+                        start_dt = now.replace(hour=19, minute=0, second=0, microsecond=0)
+                        end_dt = (now + timedelta(days=1)).replace(hour=6, minute=59, second=59, microsecond=999999)
+                    else: # Termina hoje (começou ontem)
+                        start_dt = (now - timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0)
+                        end_dt = now.replace(hour=6, minute=59, second=59, microsecond=999999)
+                atendimentos = db.get_atendimentos_by_datetime_range(
+                    start_dt.strftime("%Y-%m-%d %H:%M:%S"), end_dt.strftime("%Y-%m-%d %H:%M:%S"), badge)
+            else:
+                days = {PERIODO_15_DIAS: 15, PERIODO_30_DIAS: 30, PERIODO_60_DIAS: 60}.get(period, 15)
+                if period == PERIODO_YTD: days = (datetime.now() - datetime.now().replace(month=1, day=1)).days + 1
+                atendimentos = db.get_atendimentos_by_badge(badge, days)
+        except Exception as e:
+            print(f"Erro ao buscar atendimentos: {e}") # Loga o erro
+            messagebox.showerror("Erro de Banco de Dados", f"Não foi possível carregar o histórico: {e}")
 
         if not atendimentos:
             self.history_tree.insert("", "end", values=("Sem registros", "", ""))
         else:
             for at in atendimentos:
-                self.history_tree.insert("", "end", iid=at[0], values=(at[1], at[2], f"{at[4]} {at[5]}"))
+                badge_val = at[1] if len(at) > 1 else "N/A"
+                nome_val = at[2] if len(at) > 2 else "N/A"
+                data_val = at[4] if len(at) > 4 else "N/A"
+                hora_val = at[5] if len(at) > 5 else "N/A"
+                self.history_tree.insert("", "end", iid=at[0], values=(badge_val, nome_val, f"{data_val} {hora_val}"))
     
     def on_double_click_history(self, event):
         if item := self.history_tree.selection():
@@ -240,21 +439,31 @@ class MainWindow(tk.Tk):
             
     def save_atendimento(self):
         try:
-            if not (badge := self.entries['badge_number'].get()) or badge == self.placeholders.get('badge_number'):
+            badge_entry = self.entries.get('badge_number')
+            badge = badge_entry.get() if badge_entry else None
+            if not badge or badge == self.placeholders.get('badge_number'):
                 return messagebox.showerror("Erro", "Badge Number é obrigatório.")
 
-            data = {k: (w.get() if w.get() != self.placeholders.get(k, '') else "N/A") for k, w in {**self.entries, **self.comboboxes}.items()}
+            data = {}
+            for k, w in {**self.entries, **self.comboboxes}.items():
+                val = w.get() if w.get() != self.placeholders.get(k, '') else "" 
+                data[k] = val if val else "N/A"
             
-            queixas = [q for q, v in self.queixas_vars.items() if v.get() and q != "Outros"]
-            if self.queixas_vars.get("Outros").get() and (o := self.queixa_outros_entry.get()) and o != "Outra queixa...": 
-                queixas.append(o)
+            # --- Coleta de Queixas (MODIFICADO) ---
+            qp_sintoma = data.get("qp_sintoma", "N/A")
+            qp_regiao = data.get("qp_regiao", "N/A")
             
+            qs_sintomas_list = [q for q, v in self.qs_sintomas_vars.items() if v.get()]
+            qs_regioes_list = [r for r, v in self.qs_regioes_vars.items() if v.get()]
+            
+            qs_sintomas_json = json.dumps(qs_sintomas_list)
+            qs_regioes_json = json.dumps(qs_regioes_list)
+            # --- Fim da Coleta de Queixas ---
+
             now = datetime.now()
             
             conduta_data = {
-                'ocupacional': data.get('ocupacional', 'N/A'),
                 'hipotese_diagnostica': data.get('hipotese_diagnostica', 'N/A'),
-                'conduta_adotada': data.get('conduta_adotada', 'N/A'),
                 'resumo_conduta': data.get('resumo_conduta', 'N/A'),
                 'medicamento_administrado': data.get('medicamento_administrado', 'N/A'),
                 'posologia': data.get('posologia', 'N/A'),
@@ -262,11 +471,14 @@ class MainWindow(tk.Tk):
                 'observacoes': data.get('conduta_obs', 'N/A')
             }
 
-            atendimento_data = {k:v for k,v in data.items() if k not in conduta_data and k != 'conduta_obs'}
+            atendimento_data = {k:v for k,v in data.items() if k not in conduta_data and k not in ["conduta_obs", "qp_sintoma", "qp_regiao"]}
 
             atendimento = Atendimento(
                 **atendimento_data,
-                queixas_principais="; ".join(queixas) if queixas else "N/A",
+                qp_sintoma=qp_sintoma,
+                qp_regiao=qp_regiao,
+                qs_sintomas=qs_sintomas_json,
+                qs_regioes=qs_regioes_json,
                 condutas=[Conduta(**conduta_data)],
                 data_atendimento=now.strftime("%Y-%m-%d"),
                 hora_atendimento=now.strftime("%H:%M:%S"),
@@ -274,18 +486,68 @@ class MainWindow(tk.Tk):
             )
             db.save_atendimento(atendimento)
             messagebox.showinfo("Sucesso", "Atendimento salvo!")
-            self.clear_form(); self.refresh_history_tree()
+            self.clear_form(clear_all=True); self.refresh_history_tree() # Limpa tudo após salvar
         except Exception as e:
-            messagebox.showerror("Erro", f"Ocorreu um erro: {e}")
+            messagebox.showerror("Erro", f"Ocorreu um erro ao salvar o atendimento: {e}")
+            print(f"Erro detalhado ao salvar: {e}") # Log para depuração
+            import traceback
+            traceback.print_exc() # Imprime traceback detalhado
 
-    def clear_form(self, clear_badge=True):
-        for name, w in self.entries.items():
-            if clear_badge or name != 'badge_number':
-                utils.clear_placeholder(w, self.placeholders.get(name, "")); utils.setup_placeholder(w, self.placeholders.get(name, ""))
-        for name, w in self.comboboxes.items():
-            utils.clear_placeholder(w, self.placeholders.get(name, "")); utils.setup_placeholder(w, self.placeholders.get(name, ""))
-        for var in self.queixas_vars.values(): var.set(False)
-        if hasattr(self, 'queixa_outros_entry'): self.toggle_other_queixa("Outros")
+    # --- CORREÇÃO: Lógica clear_form revisada ---
+    def clear_form(self, clear_all=False, clear_badge=False, clear_id_fields=False, clear_anamnese_conduta=True, restore_placeholders=True):
+        """Limpa os campos do formulário com mais controle."""
+
+        # Campos de identificação (exceto badge)
+        id_fields_no_badge = ["nome", "login", "gestor", "turno", "setor", "processo", "tenure"]
+        
+        # Se clear_all ou clear_id_fields, limpa campos de ID
+        if clear_all or clear_id_fields:
+            for name in id_fields_no_badge:
+                if widget := self.entries.get(name):
+                    utils.clear_placeholder(widget, self.placeholders.get(name, ""))
+                    if restore_placeholders: utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+                if widget := self.comboboxes.get(name):
+                    utils.clear_placeholder(widget, self.placeholders.get(name, ""))
+                    if restore_placeholders: utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+
+        # Se clear_all ou clear_badge, limpa o badge
+        if clear_all or clear_badge:
+             if widget := self.entries.get("badge_number"):
+                utils.clear_placeholder(widget, self.placeholders.get("badge_number", ""))
+                if restore_placeholders: utils.setup_placeholder(widget, self.placeholders.get("badge_number", ""))
+
+        # Se clear_all ou clear_anamnese_conduta, limpa o resto
+        if clear_all or clear_anamnese_conduta:
+            # Todos os campos exceto os de identificação
+            fields_to_clear = [
+                k for k in self.entries if k not in id_fields_no_badge and k != "badge_number"
+            ] + [
+                k for k in self.comboboxes if k not in id_fields_no_badge
+            ]
+
+            for name in fields_to_clear:
+                if widget := self.entries.get(name):
+                    utils.clear_placeholder(widget, self.placeholders.get(name, ""))
+                    if restore_placeholders: utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+                if widget := self.comboboxes.get(name):
+                    # Garante que qp_sintoma não seja limpo aqui se a intenção for apenas limpar anamnese/conduta
+                    if name != "qp_sintoma" or clear_all:
+                        utils.clear_placeholder(widget, self.placeholders.get(name, ""))
+                        if restore_placeholders: utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+
+
+            # Limpa checkbuttons
+            for var in self.qs_sintomas_vars.values(): var.set(False)
+            for var in self.qs_regioes_vars.values(): var.set(False)
+        
+        # Garante que os campos sejam reabilitados (exceto se chamado com clear_all=True após salvar)
+        if hasattr(self, 'form_widgets') and self.form_widgets:
+             # Sempre reabilita tudo, a função on_qp_sintoma_change cuidará de desabilitar se necessário
+             for widget in self.form_widgets:
+                 self.set_widget_state(widget, "normal", "")
+             # Chama on_qp_sintoma_change para aplicar o estado correto baseado na seleção atual
+             self.on_qp_sintoma_change()
+
 
     def open_export_window(self): ExportWindow(self)
 

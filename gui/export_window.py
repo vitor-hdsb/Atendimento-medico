@@ -2,6 +2,7 @@
 gui/export_window.py
 --------------------
 Janela modal para exportação de dados para CSV.
+(Sem alterações neste arquivo, a lógica de exportação está em db.py)
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
