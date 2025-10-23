@@ -9,6 +9,7 @@ from gui.export_window import ExportWindow
 from gui.constants import OPTIONS, SINTOMAS, REGIOES # Importa constantes
 import sqlite3
 import json # Para salvar listas de queixas
+import main # Importa o main para acessar select_database_path
 
 # Constantes para os períodos do filtro
 PERIODO_ESCALA_ATUAL = "Escala Atual"
@@ -175,7 +176,7 @@ class MainWindow(tk.Tk):
 
         # --- Queixa Principal (Seleção Única) ---
         ttk.Label(queixa_frame, text="QP Sintoma:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        # Adiciona qp_sintoma à lista form_widgets, será removido depois em create_widgets
+        # Adiciona qp_sintoma à lista form_widgets (será removido depois)
         combo_qp_sintoma = self.create_combobox_field(queixa_frame, "", "qp_sintoma", SINTOMAS, 0, 0, add_to_form_widgets=True)
         combo_qp_sintoma.grid(row=0, column=1, sticky="ew")
         
@@ -245,10 +246,17 @@ class MainWindow(tk.Tk):
         history_frame.columnconfigure(0, weight=1); history_frame.rowconfigure(1, weight=1)
         
         controls = ttk.Frame(history_frame); controls.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        ttk.Label(controls, text="Histórico:", font=("Arial", 14, "bold")).pack(side="left")
+        ttk.Label(controls, text="Histórico:", font=("Arial", 14, "bold")).pack(side="left", padx=(0, 10))
+        
+        # Botão Atualizar Histórico
+        ttk.Button(controls, text="Atualizar", command=self.refresh_history_tree).pack(side="left", padx=(0, 10))
+
+        # Dropdown de Período
         self.history_period_var = tk.StringVar(value=PERIODO_15_DIAS)
         combo = ttk.Combobox(controls, textvariable=self.history_period_var, values=PERIODOS_FILTRO, state="readonly", width=12)
         combo.pack(side="right"); combo.bind("<<ComboboxSelected>>", self.refresh_history_tree)
+        ttk.Label(controls, text="Período:").pack(side="right", padx=(0, 5))
+
 
         tree_frame = ttk.Frame(history_frame); tree_frame.grid(row=1, column=0, sticky="nsew")
         self.history_tree = ttk.Treeview(tree_frame, columns=("badge", "nome", "data_hora"), show="headings")
@@ -260,7 +268,12 @@ class MainWindow(tk.Tk):
         self.history_tree.pack(side="left", fill="both", expand=True); scroll.pack(side="right", fill="y")
         self.history_tree.bind("<Double-1>", self.on_double_click_history)
         
-        ttk.Button(history_frame, text="Exportar Dados", command=self.open_export_window).grid(row=2, column=0, pady=10)
+        # Frame para botões abaixo do histórico
+        history_button_frame = ttk.Frame(history_frame)
+        history_button_frame.grid(row=2, column=0, pady=10, sticky='ew')
+        
+        ttk.Button(history_button_frame, text="Selecionar Banco de Dados", command=self.change_database).pack(side=tk.LEFT, padx=5)
+        ttk.Button(history_button_frame, text="Exportar Dados", command=self.open_export_window).pack(side=tk.LEFT, padx=5)
 
     def set_current_time(self):
         if entry := self.entries.get("horario_medicao"):
@@ -304,8 +317,8 @@ class MainWindow(tk.Tk):
         """Define o estado (normal/disabled) e o valor de um widget."""
         try:
             # --- CORREÇÃO: Verifica se o widget existe antes de chamar winfo_class ---
-            if not widget or not widget.winfo_exists():
-                return # Ignora se o widget foi destruído
+            if not widget or not hasattr(widget, 'winfo_exists') or not widget.winfo_exists():
+                return # Ignora se o widget foi destruído ou não é um widget válido
 
             widget_type = widget.winfo_class()
             
@@ -319,87 +332,137 @@ class MainWindow(tk.Tk):
                     # --- CORREÇÃO: Não desabilita se for qp_sintoma ---
                     if widget == self.comboboxes.get("qp_sintoma"):
                          widget.set(fill_value) # Apenas define o valor
+                         widget.config(state="readonly") # Garante que permaneça readonly
                     else:
+                        current_state = widget.cget("state")
+                        widget.config(state="normal") # Permite alterar valor
                         widget.set(fill_value)
                         widget.config(state="disabled")
+
                 elif widget_type == "TCheckbutton":
-                    var_name = widget.cget("variable")
-                    # --- CORREÇÃO: Usa try-except para getvar ---
-                    try:
-                        var = widget.getvar(var_name) # Obtém a variável BooleanVar
-                        if isinstance(var, tk.BooleanVar): # Verifica se é BooleanVar
-                           var.set(False) # Desmarca a variável
-                    except tk.TclError:
-                        pass # Ignora se a variável não puder ser obtida
+                    # Checkbuttons podem não ter getvar diretamente, acessamos a variável associada
+                    var_name = str(widget.cget("variable")) # str() para garantir string
+                    if var_name:
+                         try:
+                             # Tenta obter a variável Booleana do Tkinter associada
+                             var = widget.getvar(var_name) # Pega o NOME da variável
+                             # Assume que o nome é o mesmo que a chave em qs_sintomas_vars ou qs_regioes_vars
+                             # Isso é frágil. Seria melhor armazenar a var diretamente com o widget.
+                             
+                             # Abordagem alternativa: Procurar a var nos dicionários
+                             found_var = None
+                             for d in [self.qs_sintomas_vars, self.qs_regioes_vars]:
+                                 for key, v in d.items():
+                                     if str(v) == var_name: # Compara representação string da variável
+                                         found_var = v
+                                         break
+                                 if found_var: break
+                             
+                             if found_var and isinstance(found_var, tk.BooleanVar):
+                                 found_var.set(False) # Desmarca a variável
+                             else:
+                                 # Fallback se não encontrar a variável (pode acontecer se a lógica mudar)
+                                 # Tenta definir o estado visual diretamente (pode não funcionar perfeitamente)
+                                 widget.state(['!selected'])
+
+                         except (tk.TclError, AttributeError):
+                             pass # Ignora erros ao obter/definir variável
                     widget.config(state="disabled") # Desabilita o widget Checkbutton
                 elif widget_type == "TButton": # Trata o botão "Agora"
                     widget.config(state="disabled")
             
             else: # state == "normal"
                 if widget_type == "TEntry":
-                    widget.config(state="normal")
-                    # Limpa N/A se estava desabilitado
-                    if widget.get() == "N/A":
+                    # Limpa N/A se estava desabilitado, antes de habilitar
+                    if widget.cget("state") == "disabled" and widget.get() == "N/A":
+                        widget.config(state="normal")
                         widget.delete(0, tk.END)
+                        # Reaplicar placeholder se necessário (utils.setup_placeholder)
+                        for name, entry_widget in self.entries.items():
+                            if entry_widget == widget:
+                                utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+                                break
+                    else:
+                         widget.config(state="normal")
+
                 elif widget_type == "TCombobox":
-                     # --- CORREÇÃO: Sempre readonly para Comboboxes ---
-                    widget.config(state="readonly")
-                    # Limpa N/A se estava desabilitado
-                    if widget.get() == "N/A":
+                     # Limpa N/A se estava desabilitado, antes de habilitar
+                    if widget.cget("state") == "disabled" and widget.get() == "N/A":
+                        widget.config(state="normal") # Permite alterar valor
                         widget.set("")
+                        widget.config(state="readonly")
+                        # Reaplicar placeholder
+                        for name, combo_widget in self.comboboxes.items():
+                            if combo_widget == widget:
+                                utils.setup_placeholder(widget, self.placeholders.get(name, ""))
+                                break
+                    else:
+                        # Garante que sempre seja readonly quando habilitado
+                        widget.config(state="readonly")
+
                 elif widget_type == "TCheckbutton":
                     widget.config(state="normal")
                 elif widget_type == "TButton":
                     widget.config(state="normal")
-        except tk.TclError:
+        except tk.TclError as e:
+            print(f"TclError in set_widget_state for {widget}: {e}") # Log erro
             pass # Ignora o erro silenciosamente
 
     def on_badge_number_change(self, event):
-        badge = self.entries['badge_number'].get()
-        # --- CORREÇÃO: Chamar clear_form ANTES de preencher ---
-        if not badge:
-            # Limpa tudo exceto o badge
-            self.clear_form(clear_badge=False, clear_id_fields=True, restore_placeholders=True)
-            return # Sai da função se o badge estiver vazio
+        badge_entry = self.entries.get('badge_number')
+        if not badge_entry: return # Sai se o widget não existe
+        
+        badge = badge_entry.get()
 
-        if last := db.get_last_atendimento_by_badge(badge):
-            # Limpa APENAS os campos que serão preenchidos (exceto badge)
-            self.clear_form(clear_badge=False, clear_id_fields=False, clear_anamnese_conduta=True, restore_placeholders=False)
-            
-            fields = {'nome': last.nome, 'login': last.login, 'gestor': last.gestor, 'turno': last.turno,
-                      'setor': last.setor, 'processo': last.processo, 'tenure': last.tenure}
-            for name, value in fields.items():
+        if not badge or badge == self.placeholders.get("badge_number"):
+            # Limpa campos de ID (exceto badge) e restaura placeholders
+            self.clear_form(clear_badge=False, clear_id_fields=True, clear_anamnese_conduta=False, restore_placeholders=True)
+            return
+
+        last_data = db.get_last_atendimento_by_badge(badge)
+        if last_data:
+            # NÃO limpa o formulário aqui. Apenas preenche os campos de ID.
+            fields_to_fill = {'nome': 'nome', 'login': 'login', 'gestor': 'gestor', 'turno': 'turno',
+                              'setor': 'setor', 'processo': 'processo', 'tenure': 'tenure'}
+
+            for name, db_key in fields_to_fill.items():
+                value = last_data.get(db_key, '') # Pega valor do dict retornado pelo DB
                 widget = self.entries.get(name) or self.comboboxes.get(name)
                 if widget:
-                    # Não limpa placeholder aqui, assume que clear_form já tratou
-                    if isinstance(widget, ttk.Combobox): 
-                        # Define o valor apenas se ele existir nas opções
+                    current_placeholder = self.placeholders.get(name)
+                    utils.clear_placeholder(widget, current_placeholder) # Limpa placeholder antes de inserir
+                    if isinstance(widget, ttk.Combobox):
+                        # Define valor se existir nas opções, senão limpa
                         if value in widget['values']:
                             widget.set(value)
                         else:
-                            widget.set('') # Limpa se o valor antigo não for válido
-                    else: 
-                        widget.delete(0, tk.END); widget.insert(0, value)
-                    # Remove placeholder se houver valor preenchido
-                    utils.remove_placeholder_on_fill(widget, self.placeholders.get(name))
+                            widget.set('')
+                            if current_placeholder: utils.setup_placeholder(widget, current_placeholder) # Restaura placeholder se limpou
+                    else: # É Entry
+                        widget.delete(0, tk.END)
+                        widget.insert(0, value if value else '') # Insere valor ou string vazia
+                        if not value and current_placeholder: # Restaura placeholder se valor vazio
+                            utils.setup_placeholder(widget, current_placeholder)
+
         else:
              # Se não encontrou 'last', limpa campos de ID (exceto badge)
              self.clear_form(clear_badge=False, clear_id_fields=True, clear_anamnese_conduta=False, restore_placeholders=True)
 
-
-        self.refresh_history_tree()
+        self.refresh_history_tree() # Atualiza histórico independentemente de encontrar ou não
     
     def refresh_history_tree(self, event=None):
-        for item in self.history_tree.get_children(): self.history_tree.delete(item)
-        
-        badge_entry = self.entries.get('badge_number')
-        badge = badge_entry.get() if badge_entry else None
-        badge = None if not badge or badge == self.placeholders.get("badge_number") else badge
-
-        period = self.history_period_var.get()
-        
-        atendimentos = [] # Inicializa
+        # Adiciona um try-except para capturar erros durante a atualização
         try:
+            for item in self.history_tree.get_children(): self.history_tree.delete(item)
+            
+            badge_entry = self.entries.get('badge_number')
+            badge = badge_entry.get() if badge_entry else None
+            badge = None if not badge or badge == self.placeholders.get("badge_number") else badge
+
+            period = self.history_period_var.get()
+            
+            atendimentos = [] # Inicializa
+            
             if period == PERIODO_ESCALA_ATUAL:
                 now = datetime.now()
                 if 7 <= now.hour < 19: # Turno do dia
@@ -418,19 +481,27 @@ class MainWindow(tk.Tk):
                 days = {PERIODO_15_DIAS: 15, PERIODO_30_DIAS: 30, PERIODO_60_DIAS: 60}.get(period, 15)
                 if period == PERIODO_YTD: days = (datetime.now() - datetime.now().replace(month=1, day=1)).days + 1
                 atendimentos = db.get_atendimentos_by_badge(badge, days)
-        except Exception as e:
-            print(f"Erro ao buscar atendimentos: {e}") # Loga o erro
-            messagebox.showerror("Erro de Banco de Dados", f"Não foi possível carregar o histórico: {e}")
 
-        if not atendimentos:
-            self.history_tree.insert("", "end", values=("Sem registros", "", ""))
-        else:
-            for at in atendimentos:
-                badge_val = at[1] if len(at) > 1 else "N/A"
-                nome_val = at[2] if len(at) > 2 else "N/A"
-                data_val = at[4] if len(at) > 4 else "N/A"
-                hora_val = at[5] if len(at) > 5 else "N/A"
-                self.history_tree.insert("", "end", iid=at[0], values=(badge_val, nome_val, f"{data_val} {hora_val}"))
+            if not atendimentos:
+                self.history_tree.insert("", "end", values=("Sem registros", "", ""))
+            else:
+                for at in atendimentos:
+                    # Verifica o número de elementos na tupla 'at' antes de acessar índices
+                    at_id = at[0] if len(at) > 0 else "N/A"
+                    badge_val = at[1] if len(at) > 1 else "N/A"
+                    nome_val = at[2] if len(at) > 2 else "N/A"
+                    data_val = at[4] if len(at) > 4 else "N/A"
+                    hora_val = at[5] if len(at) > 5 else "N/A"
+                    self.history_tree.insert("", "end", iid=at_id, values=(badge_val, nome_val, f"{data_val} {hora_val}"))
+        except Exception as e:
+            print(f"Erro ao atualizar histórico: {e}") # Loga o erro
+            messagebox.showerror("Erro de Banco de Dados", f"Não foi possível carregar o histórico: {e}", parent=self)
+            # Insere uma linha indicando o erro
+            try: # Evita erro se a treeview já foi destruída
+                if not self.history_tree.get_children(): # Só insere se estiver vazia
+                    self.history_tree.insert("", "end", values=("Erro ao carregar", "", ""))
+            except tk.TclError:
+                 pass # Ignora se a treeview não existe mais
     
     def on_double_click_history(self, event):
         if item := self.history_tree.selection():
@@ -447,7 +518,16 @@ class MainWindow(tk.Tk):
             data = {}
             for k, w in {**self.entries, **self.comboboxes}.items():
                 val = w.get() if w.get() != self.placeholders.get(k, '') else "" 
-                data[k] = val if val else "N/A"
+                # Se o campo estiver desabilitado E for N/A, mantém N/A, senão usa o valor (ou N/A se vazio)
+                try:
+                     state = w.cget('state')
+                     if state == 'disabled' and val == "N/A":
+                         data[k] = "N/A"
+                     else:
+                         data[k] = val if val else "N/A"
+                except tk.TclError: # Caso get Cget falhe (ex: widget destruído)
+                     data[k] = val if val else "N/A"
+
             
             # --- Coleta de Queixas (MODIFICADO) ---
             qp_sintoma = data.get("qp_sintoma", "N/A")
@@ -544,9 +624,26 @@ class MainWindow(tk.Tk):
         if hasattr(self, 'form_widgets') and self.form_widgets:
              # Sempre reabilita tudo, a função on_qp_sintoma_change cuidará de desabilitar se necessário
              for widget in self.form_widgets:
-                 self.set_widget_state(widget, "normal", "")
+                 # Reabilita apenas se o widget ainda existir
+                 if widget and hasattr(widget, 'winfo_exists') and widget.winfo_exists():
+                     self.set_widget_state(widget, "normal", "")
              # Chama on_qp_sintoma_change para aplicar o estado correto baseado na seleção atual
              self.on_qp_sintoma_change()
+
+    # Função para ser chamada pelo botão/menu "Selecionar Banco de Dados"
+    def change_database(self):
+        new_path = main.select_database_path(initial=False) # Chama a função do main.py
+        if new_path:
+            try:
+                # Re-define o path e re-inicializa
+                if db.init_db(): # Verifica/cria tabelas no novo DB
+                     self.refresh_history_tree() # Atualiza o histórico
+                     self.clear_form(clear_all=True) # Limpa o formulário
+                     messagebox.showinfo("Banco de Dados Alterado", f"Aplicação agora usando:\n{new_path}", parent=self)
+                else:
+                     messagebox.showerror("Erro", "Não foi possível inicializar o novo banco de dados.", parent=self)
+            except Exception as e:
+                 messagebox.showerror("Erro ao Recarregar", f"Erro ao tentar usar o novo banco de dados: {e}", parent=self)
 
 
     def open_export_window(self): ExportWindow(self)
