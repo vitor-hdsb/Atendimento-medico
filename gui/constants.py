@@ -1,83 +1,83 @@
-"""
-gui/constants.py
-----------------
-Armazena constantes, como listas de opções para comboboxes e queixas,
-para serem usadas em diferentes partes da GUI.
-"""
+import json
+import os
 
-# --- Listas para Anamnese ---
+# Define o nome do arquivo de configuração das opções
+OPTIONS_FILE = "options_config.json"
 
+# --- Funções para carregar e salvar opções ---
+def load_options():
+    """Carrega as opções do arquivo JSON."""
+    default_options = {
+        "gestores": [],
+        "turnos": ["Blue Day", "Blue Night", "Red Day", "Red Night", "MID", "ADM", "12X36 - Ímpar", "12X36 - Par"],
+        "setores": [],
+        "processos": [],
+        # Mantém as opções fixas aqui
+        "resumo_conduta": ["Em observação", "Liberado para operação", "Liberado para atendimento externo c/ brigadista", "Liberado para atendimento externo s/ brigadista", "Apto para trabalho em altura", "Inapto para trabalho em altura"],
+        "medicamento_admin": ["Paracetamol", "Dipirona", "Ibuprofeno", "Outros", "N/A"]
+    }
+    try:
+        if os.path.exists(OPTIONS_FILE):
+            with open(OPTIONS_FILE, 'r', encoding='utf-8') as f:
+                loaded_options = json.load(f)
+                # Garante que todas as chaves editáveis existam
+                for key in ["gestores", "turnos", "setores", "processos"]:
+                    if key not in loaded_options:
+                        loaded_options[key] = default_options[key] # Usa o default se faltar
+                # Adiciona as chaves fixas que não vêm do JSON
+                loaded_options["resumo_conduta"] = default_options["resumo_conduta"]
+                loaded_options["medicamento_admin"] = default_options["medicamento_admin"]
+                # Ordena as listas carregadas
+                for key in ["gestores", "setores", "processos"]:
+                    if key in loaded_options:
+                         loaded_options[key] = sorted(loaded_options[key])
+                return loaded_options
+        else:
+             # Se o arquivo não existe, cria com defaults e retorna
+             save_options(default_options)
+             print(f"Arquivo '{OPTIONS_FILE}' não encontrado. Criado com valores padrão.")
+             # Ordena antes de retornar
+             for key in ["gestores", "setores", "processos"]:
+                  default_options[key] = sorted(default_options[key])
+             return default_options
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Erro ao carregar '{OPTIONS_FILE}': {e}. Usando valores padrão.")
+        # Ordena defaults antes de retornar em caso de erro
+        for key in ["gestores", "setores", "processos"]:
+             default_options[key] = sorted(default_options[key])
+        return default_options
+
+def save_options(options_dict):
+    """Salva as opções no arquivo JSON."""
+    try:
+        # Garante a ordenação antes de salvar
+        options_to_save = {}
+        editable_keys = ["gestores", "turnos", "setores", "processos"]
+        for key in editable_keys:
+             if key in options_dict:
+                 # Ordena se não for 'turnos' (que tem ordem específica)
+                 options_to_save[key] = sorted(options_dict[key]) if key != "turnos" else options_dict[key]
+
+        with open(OPTIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(options_to_save, f, indent=2, ensure_ascii=False)
+        return True
+    except IOError as e:
+        print(f"Erro ao salvar '{OPTIONS_FILE}': {e}")
+        return False
+
+# --- Carrega as opções quando o módulo é importado ---
+OPTIONS = load_options()
+
+# --- Listas de Sintomas e Regiões (mantidas aqui por enquanto) ---
 SINTOMAS = [
-    "Dor", "Ardência/Queimação", "Coçeira/Irritaçao", "Corte", 
-    "Torção/Distensão", "Vertigem", "Vômito", "Náuseas", "Fraqueza", 
-    "Confusão mental", "Abrasão/Escoriação", "Ansiedade", 
-    "Absorvente", "Trabalho em altura", "N/A"
+    "Dor", "Ardência/Queimação", "Coçeira/Irritaçao", "Corte",
+    "Torção/Distensão", "Vertigem", "Vômito", "Náuseas", "Fraqueza",
+    "Confusão mental", "Abrasão/Escoriação", "Ansiedade",
+    "Absorvente", "Trabalho em altura"
 ]
 
 REGIOES = [
-    "Cabeça", "Rosto", "Olhos", "Braços", "Mãos/Dedos", "Peitoral/Seios", 
-    "Barriga/Estômago", "Pernas", "Pé", "Tornozelo", "Menstrual", "N/A"
+    "Cabeça", "Rosto", "Olhos", "Braços", "Mãos/Dedos", "Peitoral/Seios",
+    "Barriga/Estômago", "Pernas", "Pé", "Tornozelo", "N/A", "Menstrual"
 ]
 
-
-# --- Opções dos ComboBoxes ---
-OPTIONS = {
-    "gestores": sorted([
-        "ARTHUR MANZELA DIAS DE SOUZA (MANZELAR)", "RAIANY INGRID DA SILVA (RAIANY)", 
-        "DIEGO CARLOS DA SILVA (CADIEGOV)", "BARBARA SAYURI IKI CORREA MENDES (SAYURIBA)",
-        "GUILHERME DE OLIVEIRA MORAES (DEOLIVGU)", "ANA CAROLINE RODRIGUES RATES (ANCAROC)",
-        "LUCAS GANDOLFI (LUCASGAN)", "LUCIANA VARGAS VILAR (LLUCIAVA)", "VIRGÍNIA RASTE (VRRASTE)",
-        "RUAN RODRIGO FERREIRA DE ANDRADE (RUANRODR)", "ANDERSON COSTA SOUZA (ZCOSTASO)",
-        "DOUGLAS SANTOS SILVA (SILVDOU)", "POLYANA GONCALVES DUMBA (GONCPOLY)",
-        "LORENA MOREIRA DA SILVA (SILORE)", "PEDRO HENRIQUE DE JESUS (JESPEDR)",
-        "KARINE FARIA (FAKARINE)", "VANIA LUCIA APOLINARIO PEREIRA (VANIAPER)",
-        "SILVIO MARTINS SOUZA (SILVISOU)", "MILLANE AZEVEDO MEIRA (AZMILLAN)",
-        "RAFAEL PEREIRA (PERAFAEU)", "JOAO VITOR BARBOSA CARNEIRO (JOACARNE)",
-        "KAMILLY APARECIDA SOUZA DA SILVA (APARKAMI)", "MATEUS FLORES (MATTMF)",
-        "INGRID DA COSTA ZANETI (IZZANETI)", "VITOR HUGO DE SOUZA BRAGA (VITODESO)",
-        "LETICIA GOMES PEREIRA (LVGOMESP)", "LUDMILA MARIA DE JESUS (JLUDMILA)",
-        "MARESSA LUIZA PAIXAO PEGA (MPAIXAO)", "ANA PAULA DOS SANTOS PINHEIRO (PAULADOS)",
-        "TAÍS CORREIA (TAISREIS)", "LUANA REBECCA DE SOUZA (LUANAREB)",
-        "HUMBERTO LEANDRO REGIS SILVA (LEAHUMBE)", "MAICON VALERIO DE SOUZA (MAICVALE)",
-        "LEILANY PRISCILA BARROS CIRINO DE SOUZA (LEILASOU)", "ANIELLE CRISTINA DE LIMA RODRIGUES (CANIELLE)",
-        "ANA CAROLINE FERREIRA DUARTE (ANRCAROL)", "CAROLINE GEORGia VICENTINI MAIA (CAROMAIA)",
-        "GABRIEL ITALO CHAVES (CHVESG)", "ALICE DIAS SILVA (DIASALI)",
-        "PAULO HENRIQUE G KERN BELLO (HENRPAUI)", "FABRÍCIO ORTIZ (FWOO)",
-        "FRANK DIAS DA SILVA (FRNKSIL)", "DIEGO ROCHA RIBEIRO DE SOUZA (ROCHARIB)",
-        "WAGNER GUIMARAES DOS SANTOS (WAGNSANT)", "ANA CAROLINA SANTOS F CALDEIRA (CARANAH)",
-        "LUANA PAIVA DA SILVA (LUAPAIVU)", "WILLIAN RODRIGUES DA SILVA (WILLSIL)",
-        "RAUL ESPINOSA (RAULESPB)", "BEATRIZ MOREIRA SOUZA (MOBEATRJ)",
-        "LUCIANA PEREIRA RODRIGUES (LCIANR)", "MAYCON DOUGLAS FERREIRA DE PAULA (DOUGMAYC)",
-        "MARCILENE APARECIDA DE ALMEIDA (APAMARCF)", "ALANIS VIANA CASTRO (ALANISCV)",
-        "DEBORA ACASSIO LOPES (LODEBOR)", "MERLEN CÂNDIDO (MKRC)", "AQUILA COSTA DO CARMO (AQUCARMO)",
-        "KAROLINE MOURA (KAROLMT)", "RONIERY MAGALHAES PAES (PAESRONI)",
-        "JOSE OSWALDO BRASILEiro ROSSI LIMA LIMA (JOSELIMW)", "THIAGO HAMACHER (THIHAM)",
-        "BRUNO CEZAR VARELA (VARBRUNO)", "FELICIO FRANCISCO JARDIM MATOS (FELIJFRA)",
-        "MARIO MONTEIRO (AMMANTE)"
-    ]),
-    "turnos": ["Blue Day", "Blue Night", "Red Day", "Red Night", "MID", "ADM", "12X36 - Ímpar", "12X36 - Par"],
-    "setores": sorted([
-        "C-RET", "Enviroment", "IB", "ICQA", "Insumos", "Learning", "LP", 
-        "Melhoria Contínua (ICQA)", "N/A", "OB", "RME - Sodexo", "RME - Terceiros", 
-        "RME - Toledo", "Sodexo - Cozinha", "TI", "TOM", "Transfer-in", 
-        "Transfer-out", "Sodexo - Limpeza", "WHS", "PXT"
-    ]),
-    "processos": sorted([
-        "Administrativo", "Contagem", "Cozinha", "Damaged", "Decante", "Doca", 
-        "Drop test", "Geral", "Inbound", "ISS", "Líder TDR", "Manutenção", 
-        "Melhora Continua", "NED", "Observador", "Pack", "Pick", "Pick - PIT", 
-        "PIT", "PREP", "Problem Solve", "Rebin", "Recebimento", "Slam", 
-        "Spider", "Stow", "Stow - PIT", "Stow Pallet", "Suporte", 
-        "Transfer In", "Transfer Out", "Yard Marshal"
-    ]),
-    "ocupacional": ["Sim", "Não", "N/A"], # Mantido caso seja usado em outro local
-    "resumo_conduta": [
-        "Em observação", "Liberado para operação", 
-        "Liberado para atendimento externo c/ brigadista", 
-        "Liberado para atendimento externo s/ brigadista",
-        "Apto para trabalho em altura", # Adicionado
-        "Inapto para trabalho em altura", # Adicionado
-        "N/A"
-    ],
-    "medicamento_admin": ["Paracetamol", "Dipirona", "Ibuprofeno", "Outros", "N/A"]
-}
