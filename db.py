@@ -2,69 +2,53 @@
 db.py
 -----
 Módulo para gerenciamento do banco de dados SQLite.
-Utiliza um caminho configurável para o arquivo DB.
 """
 import sqlite3
 from datetime import datetime, timedelta
 import csv
 from models import Atendimento, Conduta
 import os
-import json # Adicionado para queixas
+import json # Importa json
+# --- CORREÇÃO ERRO EXPORTAÇÃO ---
+# Importa SINTOMAS e REGIOES para a função de exportar CSV
+from gui.constants import SINTOMAS, REGIOES
+# --- FIM CORREÇÃO ---
 
-# Variável global para armazenar o caminho do banco de dados atual
+
+# Variável global para armazenar o caminho do DB
 _db_path = None
 
-def set_db_path(path):
-    """Define o caminho do arquivo de banco de dados a ser usado."""
+def set_db_path(filepath):
+    """Define o caminho do banco de dados a ser usado."""
     global _db_path
-    # Validação básica
-    if path and os.path.exists(os.path.dirname(path)) and path.lower().endswith(".db"):
-         # Verifica se o diretório existe e se termina com .db
-        _db_path = path
-        print(f"Caminho do banco de dados definido para: {_db_path}") # Log
+    if filepath and os.path.exists(os.path.dirname(filepath)):
+        _db_path = filepath
         return True
-    elif path and not os.path.exists(os.path.dirname(path)):
-         print(f"Erro: Diretório para o banco de dados não existe: {os.path.dirname(path)}")
-         _db_path = None
-         return False
-    else:
-        print(f"Erro: Caminho do banco de dados inválido: {path}")
-        _db_path = None
-        return False
-
-def get_db_path():
-    """Retorna o caminho do banco de dados atualmente configurado."""
-    # Idealmente, esta função não deveria existir; as outras deveriam usar _db_path.
-    # Mas para mínima alteração, vamos mantê-la por enquanto.
-    # Ou melhor: vamos refatorar para usar _db_path diretamente.
-    if not _db_path:
-        raise ValueError("Caminho do banco de dados não foi definido. Chame set_db_path primeiro.")
-    return _db_path
+    return False
 
 def _get_connection():
-    """Retorna uma conexão com o banco de dados configurado."""
-    if not _db_path:
-        raise ConnectionError("Caminho do banco de dados não definido.")
+    """Retorna uma conexão com o banco de dados usando o caminho definido."""
+    if _db_path is None:
+        raise ValueError("Caminho do banco de dados não foi definido. Chame set_db_path() primeiro.")
     try:
         conn = sqlite3.connect(_db_path)
-        conn.execute("PRAGMA foreign_keys = ON;") # Habilita chaves estrangeiras
-        conn.execute("PRAGMA journal_mode = WAL;") # Mantém WAL mode
+        conn.execute("PRAGMA journal_mode = WAL;")
+        # Habilita chaves estrangeiras
+        conn.execute("PRAGMA foreign_keys = ON;")
         return conn
-    except sqlite3.Error as e:
-        raise ConnectionError(f"Erro ao conectar ao banco de dados em {_db_path}: {e}") from e
-
+    except sqlite3.OperationalError as e:
+        print(f"Erro ao conectar ao DB em {_db_path}: {e}")
+        return None
 
 def init_db():
-    """Inicializa o banco de dados no caminho configurado."""
-    # Não precisa mais verificar _db_path aqui, _get_connection faz isso.
+    """Inicializa o banco de dados e cria as tabelas se não existirem."""
     conn = None
     try:
-        # Apenas tenta conectar; se o arquivo não existir, connect cria.
-        # Mas precisamos garantir que as tabelas existam.
         conn = _get_connection()
+        if conn is None: return False
         cursor = conn.cursor()
 
-        # Cria a tabela atendimentos se não existir (com novas colunas de queixa)
+        # Tabela para os atendimentos
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS atendimentos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,13 +60,17 @@ def init_db():
                 setor TEXT,
                 processo TEXT,
                 tenure TEXT,
-                qp_sintoma TEXT DEFAULT 'N/A',      -- Queixa Principal Sintoma
-                qp_regiao TEXT DEFAULT 'N/A',       -- Queixa Principal Região
-                qs_sintomas TEXT DEFAULT '[]',      -- Queixa Secundária Sintomas (JSON)
-                qs_regioes TEXT DEFAULT '[]',       -- Queixa Secundária Regiões (JSON)
+                -- MELHORIA: Adiciona tipo_atendimento
+                tipo_atendimento TEXT,
+                -- Campos de Queixa Atualizados
+                qp_sintoma TEXT,
+                qp_regiao TEXT,
+                qs_sintomas TEXT,
+                qs_regioes TEXT,
+                -- Fim Campos de Queixa
                 hqa TEXT,
                 tax TEXT,
-                pa_sintolica TEXT,
+                pa_sistolica TEXT,
                 pa_diastolica TEXT,
                 fc TEXT,
                 sat TEXT,
@@ -95,22 +83,37 @@ def init_db():
                 semana_iso INTEGER NOT NULL
             )
         """)
-        # Adiciona colunas se não existirem (para migração simples)
-        _add_column_if_not_exists(cursor, 'atendimentos', 'qp_sintoma', 'TEXT', 'N/A')
-        _add_column_if_not_exists(cursor, 'atendimentos', 'qp_regiao', 'TEXT', 'N/A')
-        _add_column_if_not_exists(cursor, 'atendimentos', 'qs_sintomas', 'TEXT', '[]')
-        _add_column_if_not_exists(cursor, 'atendimentos', 'qs_regioes', 'TEXT', '[]')
-        # Remove coluna antiga se existir (opcional, cuidado com perda de dados)
-        # _remove_column_if_exists(cursor, 'atendimentos', 'queixas_principais')
+        
+        # --- Verificação de Colunas Faltando (Migração Simples) ---
+        colunas_atendimento = [col[1] for col in cursor.execute("PRAGMA table_info(atendimentos)").fetchall()]
+        colunas_necessarias = ['tipo_atendimento', 'qp_sintoma', 'qp_regiao', 'qs_sintomas', 'qs_regioes']
+        
+        for col in colunas_necessarias:
+            if col not in colunas_atendimento:
+                try:
+                    cursor.execute(f"ALTER TABLE atendimentos ADD COLUMN {col} TEXT DEFAULT 'N/A'")
+                    print(f"Coluna '{col}' adicionada à tabela 'atendimentos'.")
+                except sqlite3.OperationalError as e:
+                    print(f"Aviso: Não foi possível adicionar a coluna {col}: {e}")
+
+        # Remove coluna antiga 'queixas_principais' se existir e novas colunas existirem
+        if 'queixas_principais' in colunas_atendimento and 'qp_sintoma' in colunas_atendimento:
+             try:
+                 # Renomeia para backup, em vez de apagar
+                 cursor.execute("ALTER TABLE atendimentos RENAME COLUMN queixas_principais TO queixas_principais_old")
+                 print("Coluna 'queixas_principais' antiga renomeada para 'queixas_principais_old'.")
+             except sqlite3.OperationalError as e:
+                 print(f"Aviso: Não foi possível renomear a coluna 'queixas_principais': {e}")
+        # --- Fim Migração Simples ---
 
 
-        # Cria a tabela condutas se não existir
+        # Tabela para as condutas
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS condutas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 atendimento_id INTEGER NOT NULL,
                 hipotese_diagnostica TEXT,
-                -- conduta_adotada TEXT, -- Removido conforme solicitado
+                -- conduta_adotada TEXT, -- Removido
                 resumo_conduta TEXT,
                 medicamento_administrado TEXT,
                 posologia TEXT,
@@ -119,71 +122,51 @@ def init_db():
                 FOREIGN KEY (atendimento_id) REFERENCES atendimentos (id) ON DELETE CASCADE
             )
         """)
-        # Remove coluna antiga se existir (opcional)
-        # _remove_column_if_exists(cursor, 'condutas', 'conduta_adotada')
+        
+        # Verifica coluna 'conduta_adotada' e remove se existir
+        colunas_conduta = [col[1] for col in cursor.execute("PRAGMA table_info(condutas)").fetchall()]
+        if 'conduta_adotada' in colunas_conduta:
+            try:
+                # Renomeia para backup
+                cursor.execute("ALTER TABLE condutas RENAME COLUMN conduta_adotada TO conduta_adotada_old")
+                print("Coluna 'conduta_adotada_old' antiga renomeada.")
+            except sqlite3.OperationalError as e:
+                 print(f"Aviso: Não foi possível renomear a coluna 'conduta_adotada': {e}")
+
 
         conn.commit()
-        print(f"Banco de dados inicializado/verificado em: {_db_path}") # Log
-        return True # Indica sucesso
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-         print(f"Erro ao inicializar o banco de dados: {e}")
-         return False # Indica falha
+        return True
+    except Exception as e:
+        print(f"Erro em init_db: {e}")
+        return False
     finally:
         if conn:
             conn.close()
-
-# Função auxiliar para adicionar coluna (migração simples)
-def _add_column_if_not_exists(cursor, table_name, column_name, column_type, default_value=None):
-    try:
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = [info[1] for info in cursor.fetchall()]
-        if column_name not in columns:
-            default_clause = f"DEFAULT '{default_value}'" if default_value is not None else ""
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type} {default_clause}")
-            print(f"Coluna '{column_name}' adicionada à tabela '{table_name}'.")
-    except sqlite3.Error as e:
-        print(f"Erro ao verificar/adicionar coluna {column_name} em {table_name}: {e}")
-
-# Função auxiliar para remover coluna (migração simples, CUIDADO: PERDA DE DADOS)
-# def _remove_column_if_exists(cursor, table_name, column_name):
-#     try:
-#         cursor.execute(f"PRAGMA table_info({table_name})")
-#         columns = [info[1] for info in cursor.fetchall()]
-#         if column_name in columns:
-#             # SQLite < 3.35 não suporta DROP COLUMN diretamente de forma simples
-#             # A abordagem segura seria criar nova tabela, copiar dados, dropar antiga, renomear nova
-#             # Para simplificar (assumindo SQLite >= 3.35 ou aceitando a complexidade):
-#             try:
-#                  cursor.execute(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
-#                  print(f"Coluna '{column_name}' removida da tabela '{table_name}'.")
-#             except sqlite3.OperationalError:
-#                  print(f"Aviso: Sua versão do SQLite pode não suportar DROP COLUMN diretamente para '{column_name}'.")
-#                  # Implementar a abordagem de recriar a tabela se necessário aqui
-#                  pass
-#     except sqlite3.Error as e:
-#         print(f"Erro ao verificar/remover coluna {column_name} em {table_name}: {e}")
-
 
 def save_atendimento(atendimento: Atendimento):
     """Salva um novo atendimento e suas condutas no banco de dados."""
     conn = None
     try:
         conn = _get_connection()
+        if conn is None: return None
         cursor = conn.cursor()
 
-        # Insere o atendimento principal (com novas colunas de queixa)
+        # Insere o atendimento principal
         cursor.execute("""
             INSERT INTO atendimentos (
                 badge_number, nome, login, gestor, turno, setor, processo, tenure,
-                qp_sintoma, qp_regiao, qs_sintomas, qs_regioes, -- Novas colunas
+                tipo_atendimento, qp_sintoma, qp_regiao, qs_sintomas, qs_regioes,
                 hqa, tax, pa_sistolica, pa_diastolica, fc, sat, doencas_preexistentes,
                 alergias, medicamentos_em_uso, observacoes, data_atendimento,
                 hora_atendimento, semana_iso
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             atendimento.badge_number, atendimento.nome, atendimento.login, atendimento.gestor,
             atendimento.turno, atendimento.setor, atendimento.processo, atendimento.tenure,
-            atendimento.qp_sintoma, atendimento.qp_regiao, atendimento.qs_sintomas, atendimento.qs_regioes, # Valores JSON
+            # --- MELHORIA: Salva tipo_atendimento e novas queixas ---
+            atendimento.tipo_atendimento, atendimento.qp_sintoma, atendimento.qp_regiao,
+            atendimento.qs_sintomas, atendimento.qs_regioes,
+            # --- Fim ---
             atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
             atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
             atendimento.alergias, atendimento.medicamentos_em_uso, atendimento.observacoes,
@@ -191,7 +174,7 @@ def save_atendimento(atendimento: Atendimento):
         ))
         atendimento_id = cursor.lastrowid
 
-        # Insere todas as condutas associadas (sem conduta_adotada)
+        # Insere todas as condutas associadas
         for conduta in atendimento.condutas:
             cursor.execute("""
                 INSERT INTO condutas (
@@ -207,10 +190,10 @@ def save_atendimento(atendimento: Atendimento):
 
         conn.commit()
         return atendimento_id
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-         print(f"Erro ao salvar atendimento: {e}")
-         if conn: conn.rollback() # Desfaz alterações em caso de erro
-         raise # Re-levanta a exceção para a GUI tratar
+    except Exception as e:
+        print(f"Erro ao salvar atendimento: {e}")
+        if conn: conn.rollback()
+        return None
     finally:
         if conn:
             conn.close()
@@ -221,7 +204,9 @@ def get_atendimento_by_id(atendimento_id):
     conn = None
     try:
         conn = _get_connection()
-        conn.row_factory = sqlite3.Row # Retorna resultados como dicionários
+        if conn is None: return None
+        # Configura a conexão para retornar dicionários
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         # Busca o atendimento
@@ -230,89 +215,100 @@ def get_atendimento_by_id(atendimento_id):
         if not atendimento_data:
             return None
 
-        # Converte a Row em um dict para passar para o construtor
+        # Converte sqlite3.Row para dict para passar como kwargs
         atendimento_dict = dict(atendimento_data)
+
+        # Remove 'queixas_principais_old' se existir
+        atendimento_dict.pop('queixas_principais_old', None)
+        
+        atendimento = Atendimento(**atendimento_dict)
 
         # Busca as condutas associadas
         cursor.execute("SELECT * FROM condutas WHERE atendimento_id = ?", (atendimento_id,))
         condutas_data = cursor.fetchall()
         
-        condutas_list = [
-            Conduta(
-                hipotese_diagnostica=c["hipotese_diagnostica"],
-                resumo_conduta=c["resumo_conduta"],
-                medicamento_administrado=c["medicamento_administrado"],
-                posologia=c["posologia"],
-                horario_medicacao=c["horario_medicacao"],
-                observacoes=c["observacoes"]
-            ) for c in condutas_data
-        ]
-        
-        # Cria o objeto Atendimento
-        atendimento = Atendimento(**atendimento_dict) # Passa o dict desempacotado
-        atendimento.condutas = condutas_list # Adiciona a lista de condutas
+        atendimento.condutas = []
+        for conduta_row in condutas_data:
+            conduta_dict = dict(conduta_row)
+            # Remove 'conduta_adotada_old' se existir
+            conduta_dict.pop('conduta_adotada_old', None)
+            atendimento.condutas.append(Conduta(**conduta_dict))
 
         return atendimento
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-         print(f"Erro ao buscar atendimento por ID ({atendimento_id}): {e}")
-         return None # Ou raise? Depende de como a GUI quer tratar
+    except Exception as e:
+        print(f"Erro em get_atendimento_by_id: {e}")
+        return None
     finally:
         if conn:
             conn.close()
 
 def get_last_atendimento_by_badge(badge_number):
-    """Busca o último atendimento de um paciente pelo número do crachá."""
+    """Busca os dados de identificação do último atendimento de um paciente."""
     conn = None
     try:
         conn = _get_connection()
-        conn.row_factory = sqlite3.Row
+        if conn is None: return None
+        conn.row_factory = sqlite3.Row # Retorna como dict
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM atendimentos WHERE badge_number = ? ORDER BY data_atendimento DESC, hora_atendimento DESC LIMIT 1", (badge_number,))
-        atendimento_data = cursor.fetchone()
-        if atendimento_data:
-            # Retorna um dict simples, talvez não precise do objeto Atendimento completo aqui
-            return dict(atendimento_data)
+        
+        # Seleciona apenas os campos de identificação
+        cursor.execute("""
+            SELECT nome, login, gestor, turno, setor, processo, tenure
+            FROM atendimentos
+            WHERE badge_number = ?
+            ORDER BY data_atendimento DESC, hora_atendimento DESC
+            LIMIT 1
+        """, (badge_number,))
+        
+        data = cursor.fetchone()
+        if data:
+            return dict(data) # Retorna um dicionário
         return None
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-         print(f"Erro ao buscar último atendimento por badge ({badge_number}): {e}")
-         return None
+    except Exception as e:
+        print(f"Erro em get_last_atendimento_by_badge: {e}")
+        return None
     finally:
         if conn:
             conn.close()
 
 
 def get_atendimentos_by_badge(badge_number=None, days_ago=15):
-    """
-    Busca atendimentos recentes para um paciente por período em dias.
-    """
+    """Busca atendimentos recentes para um paciente por período em dias."""
     conn = None
     try:
         conn = _get_connection()
-        # conn.row_factory = sqlite3.Row # Não necessário, retorna tuplas como antes
+        if conn is None: return []
         cursor = conn.cursor()
         
         date_limit = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
 
         query_params = [date_limit]
+        # --- MELHORIA: Adiciona qp_sintoma e resumo_conduta (via subquery) ---
         query_str = """
-            SELECT id, badge_number, nome, login, data_atendimento, hora_atendimento
-            FROM atendimentos
-            WHERE data_atendimento >= ?
+            SELECT
+                a.id, a.badge_number, a.nome, a.login,
+                a.data_atendimento, a.hora_atendimento,
+                a.qp_sintoma,
+                (SELECT c.resumo_conduta FROM condutas c
+                 WHERE c.atendimento_id = a.id LIMIT 1) as resumo_conduta
+            FROM atendimentos a
+            WHERE a.data_atendimento >= ?
         """
+        # --- Fim Melhoria ---
         
         if badge_number is not None:
-            query_str += " AND badge_number = ?"
+            query_str += " AND a.badge_number = ?"
             query_params.append(badge_number)
         
-        query_str += " ORDER BY data_atendimento DESC, hora_atendimento DESC"
+        query_str += " ORDER BY a.data_atendimento DESC, a.hora_atendimento DESC"
         
         cursor.execute(query_str, query_params)
         
         result = cursor.fetchall()
         return result
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-        print(f"Erro ao buscar atendimentos por badge/dias: {e}")
-        return [] # Retorna lista vazia em caso de erro
+    except Exception as e:
+        print(f"Erro em get_atendimentos_by_badge: {e}")
+        return []
     finally:
         if conn:
             conn.close()
@@ -322,27 +318,35 @@ def get_atendimentos_by_datetime_range(start_datetime_str, end_datetime_str, bad
     conn = None
     try:
         conn = _get_connection()
+        if conn is None: return []
         cursor = conn.cursor()
         
         query_params = [start_datetime_str, end_datetime_str]
+        # --- MELHORIA: Adiciona qp_sintoma e resumo_conduta (via subquery) ---
         query_str = """
-            SELECT id, badge_number, nome, login, data_atendimento, hora_atendimento
-            FROM atendimentos
-            WHERE (data_atendimento || ' ' || hora_atendimento) BETWEEN ? AND ?
+            SELECT
+                a.id, a.badge_number, a.nome, a.login,
+                a.data_atendimento, a.hora_atendimento,
+                a.qp_sintoma,
+                (SELECT c.resumo_conduta FROM condutas c
+                 WHERE c.atendimento_id = a.id LIMIT 1) as resumo_conduta
+            FROM atendimentos a
+            WHERE (a.data_atendimento || ' ' || a.hora_atendimento) BETWEEN ? AND ?
         """
+        # --- Fim Melhoria ---
         
         if badge_number is not None:
-            query_str += " AND badge_number = ?"
+            query_str += " AND a.badge_number = ?"
             query_params.append(badge_number)
         
-        query_str += " ORDER BY data_atendimento DESC, hora_atendimento DESC"
+        query_str += " ORDER BY a.data_atendimento DESC, a.hora_atendimento DESC"
         
         cursor.execute(query_str, query_params)
         
         result = cursor.fetchall()
         return result
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-        print(f"Erro ao buscar atendimentos por range de data/hora: {e}")
+    except Exception as e:
+        print(f"Erro em get_atendimentos_by_datetime_range: {e}")
         return []
     finally:
         if conn:
@@ -353,14 +357,15 @@ def update_atendimento(atendimento: Atendimento):
     conn = None
     try:
         conn = _get_connection()
+        if conn is None: return
         cursor = conn.cursor()
 
-        # Atualiza o atendimento principal (com novas colunas de queixa)
+        # Atualiza o atendimento principal
         cursor.execute("""
             UPDATE atendimentos SET
                 nome = ?, login = ?, gestor = ?, turno = ?, setor = ?, processo = ?,
-                tenure = ?,
-                qp_sintoma = ?, qp_regiao = ?, qs_sintomas = ?, qs_regioes = ?, -- Novas
+                tenure = ?, 
+                tipo_atendimento = ?, qp_sintoma = ?, qp_regiao = ?, qs_sintomas = ?, qs_regioes = ?,
                 hqa = ?, tax = ?, pa_sistolica = ?,
                 pa_diastolica = ?, fc = ?, sat = ?, doencas_preexistentes = ?, alergias = ?,
                 medicamentos_em_uso = ?, observacoes = ?
@@ -368,7 +373,10 @@ def update_atendimento(atendimento: Atendimento):
         """, (
             atendimento.nome, atendimento.login, atendimento.gestor, atendimento.turno,
             atendimento.setor, atendimento.processo, atendimento.tenure,
-            atendimento.qp_sintoma, atendimento.qp_regiao, atendimento.qs_sintomas, atendimento.qs_regioes, # Valores JSON
+            # --- MELHORIA: Salva tipo_atendimento e novas queixas ---
+            atendimento.tipo_atendimento, atendimento.qp_sintoma, atendimento.qp_regiao,
+            atendimento.qs_sintomas, atendimento.qs_regioes,
+            # --- Fim ---
             atendimento.hqa, atendimento.tax, atendimento.pa_sistolica,
             atendimento.pa_diastolica, atendimento.fc, atendimento.sat, atendimento.doencas_preexistentes,
             atendimento.alergias, atendimento.medicamentos_em_uso,
@@ -391,10 +399,9 @@ def update_atendimento(atendimento: Atendimento):
             ))
 
         conn.commit()
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-        print(f"Erro ao atualizar atendimento ({atendimento.id}): {e}")
+    except Exception as e:
+        print(f"Erro ao atualizar atendimento: {e}")
         if conn: conn.rollback()
-        raise
     finally:
         if conn:
             conn.close()
@@ -404,13 +411,13 @@ def delete_atendimento(atendimento_id: int):
     conn = None
     try:
         conn = _get_connection()
+        if conn is None: return
         cursor = conn.cursor()
         cursor.execute("DELETE FROM atendimentos WHERE id = ?", (atendimento_id,))
         conn.commit()
-    except (ValueError, ConnectionError, sqlite3.Error) as e:
-        print(f"Erro ao deletar atendimento ({atendimento_id}): {e}")
+    except Exception as e:
+        print(f"Erro ao deletar atendimento: {e}")
         if conn: conn.rollback()
-        raise
     finally:
         if conn:
             conn.close()
@@ -418,8 +425,14 @@ def delete_atendimento(atendimento_id: int):
 def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
     """Exporta os dados de atendimentos e condutas para um arquivo CSV."""
     conn = None
+    
+    # --- CORREÇÃO ERRO EXPORTAÇÃO: Garante que SINTOMAS e REGIOES estão disponíveis ---
+    # (Eles já estão importados no topo do arquivo)
+    # --- FIM CORREÇÃO ---
+    
     try:
         conn = _get_connection()
+        if conn is None: return
         conn.row_factory = sqlite3.Row # Facilita acesso por nome de coluna
         cursor = conn.cursor()
 
@@ -427,132 +440,94 @@ def export_to_csv(filepath, start_date=None, end_date=None, week_iso=None):
         query_str = "SELECT * FROM atendimentos WHERE 1=1"
 
         if start_date and end_date:
-            # Se for 'hoje', start e end são iguais
-            if start_date == end_date:
-                 query_str += " AND data_atendimento = ?"
-                 query_params.append(start_date)
-            else:
-                query_str += " AND data_atendimento BETWEEN ? AND ?"
-                query_params.extend([start_date, end_date])
+            query_str += " AND data_atendimento BETWEEN ? AND ?"
+            query_params.extend([start_date, end_date])
         elif week_iso:
             query_str += " AND semana_iso = ?"
             query_params.append(week_iso)
-        # else: # Se nenhum filtro for aplicado, exporta tudo? Ou default para hoje?
-        #     # Default para hoje se nenhum outro filtro for dado
+        # Se nenhum filtro, exporta TUDO (removido filtro de "Dia atual"
+        # else: # Dia atual
         #     query_str += " AND data_atendimento = ?"
         #     query_params.append(datetime.now().strftime("%Y-%m-%d"))
 
-        query_str += " ORDER BY data_atendimento, hora_atendimento" # Ordena para o CSV
-
         cursor.execute(query_str, query_params)
-        atendimentos = cursor.fetchall()
+        atendimentos = cursor.fetchall() # Lista de sqlite3.Row (dicts)
 
-        # Define os cabeçalhos do CSV (incluindo novos campos e excluindo antigos)
-        fieldnames = [
-            "id_atendimento", "badge_number", "nome", "login", "gestor", "turno", "setor", "processo", "tenure",
-            "qp_sintoma", "qp_regiao", # Novos campos QP
-            "hqa", "tax", "pa_sistolica", "pa_diastolica", "fc", "sat", "doencas_preexistentes",
-            "alergias", "medicamentos_em_uso", "observacoes_atendimento", "data_atendimento",
-            "hora_atendimento", "semana_iso",
-            # Cabeçalhos Conduta (sem conduta_adotada)
-            "id_conduta", "hipotese_diagnostica", "resumo_conduta", "medicamento_administrado",
-            "posologia", "horario_medicacao", "observacoes_conduta",
-             # Cabeçalhos QS (One-Hot Encoding)
-            *[f"qs_sintoma_{s.replace('/', '_').replace(' ', '_')}" for s in SINTOMAS if s != 'N/A'],
-            *[f"qs_regiao_{r.replace('/', '_').replace(' ', '_')}" for r in REGIOES if r not in ['N/A', 'Menstrual']]
+        fieldnames_atendimento = [
+            "id", "badge_number", "nome", "login", "gestor", "turno", "setor", "processo", "tenure",
+            "tipo_atendimento", "qp_sintoma", "qp_regiao",
+            "hqa", "tax", "pa_sistolica", "pa_diastolica", "fc", "sat",
+            "doencas_preexistentes", "alergias", "medicamentos_em_uso", "observacoes",
+            "data_atendimento", "hora_atendimento", "semana_iso"
         ]
-        # REGIOES e SINTOMAS precisam ser importados ou definidos aqui
-        from gui.constants import SINTOMAS, REGIOES # Importa aqui
+        
+        # Campos de Queixa Secundária (One-Hot)
+        # Remove "Absorvente" e "Trabalho em altura" da exportação One-Hot? Não, deixa
+        qs_sintoma_headers = [f"qs_sintoma_{s.replace(' ', '_').replace('/', '_')}" for s in SINTOMAS]
+        qs_regiao_headers = [f"qs_regiao_{r.replace(' ', '_').replace('/', '_')}" for r in REGIOES]
+        
+        fieldnames_conduta = [
+            "conduta_id", "hipotese_diagnostica",
+            "resumo_conduta", "medicamento_administrado",
+            "posologia", "horario_medicacao", "observacoes_conduta"
+        ]
+        
+        # Junta todos os cabeçalhos
+        fieldnames = fieldnames_atendimento + qs_sintoma_headers + qs_regiao_headers + fieldnames_conduta
 
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore') # Ignora colunas extras
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
 
             for atendimento_row in atendimentos:
-                atendimento_dict = dict(atendimento_row) # Converte Row para dict
+                atendimento_dict = dict(atendimento_row)
                 atendimento_id = atendimento_dict.get("id")
 
-                # Processa Queixas Secundárias
-                qs_sintomas_list = []
-                qs_regioes_list = []
-                try: qs_sintomas_list = json.loads(atendimento_dict.get("qs_sintomas", "[]"))
-                except json.JSONDecodeError: pass
-                try: qs_regioes_list = json.loads(atendimento_dict.get("qs_regioes", "[]"))
-                except json.JSONDecodeError: pass
+                # --- Processa One-Hot para Queixas Secundárias ---
+                try:
+                    qs_sintomas_list = json.loads(atendimento_dict.get('qs_sintomas', '[]'))
+                except: qs_sintomas_list = []
+                try:
+                    qs_regioes_list = json.loads(atendimento_dict.get('qs_regioes', '[]'))
+                except: qs_regioes_list = []
 
-                # Prepara dados base da linha do CSV
-                csv_row_base = {
-                    "id_atendimento": atendimento_id,
-                    "badge_number": atendimento_dict.get("badge_number"),
-                    "nome": atendimento_dict.get("nome"),
-                    "login": atendimento_dict.get("login"),
-                    "gestor": atendimento_dict.get("gestor"),
-                    "turno": atendimento_dict.get("turno"),
-                    "setor": atendimento_dict.get("setor"),
-                    "processo": atendimento_dict.get("processo"),
-                    "tenure": atendimento_dict.get("tenure"),
-                    "qp_sintoma": atendimento_dict.get("qp_sintoma"),
-                    "qp_regiao": atendimento_dict.get("qp_regiao"),
-                    "hqa": atendimento_dict.get("hqa"),
-                    "tax": atendimento_dict.get("tax"),
-                    "pa_sistolica": atendimento_dict.get("pa_sistolica"),
-                    "pa_diastolica": atendimento_dict.get("pa_diastolica"),
-                    "fc": atendimento_dict.get("fc"),
-                    "sat": atendimento_dict.get("sat"),
-                    "doencas_preexistentes": atendimento_dict.get("doencas_preexistentes"),
-                    "alergias": atendimento_dict.get("alergias"),
-                    "medicamentos_em_uso": atendimento_dict.get("medicamentos_em_uso"),
-                    "observacoes_atendimento": atendimento_dict.get("observacoes"), # Renomeado para evitar conflito
-                    "data_atendimento": atendimento_dict.get("data_atendimento"),
-                    "hora_atendimento": atendimento_dict.get("hora_atendimento"),
-                    "semana_iso": atendimento_dict.get("semana_iso"),
-                }
-                 # Adiciona One-Hot Encoding para QS
                 for s in SINTOMAS:
-                     if s != 'N/A':
-                         col_name = f"qs_sintoma_{s.replace('/', '_').replace(' ', '_')}"
-                         csv_row_base[col_name] = 1 if s in qs_sintomas_list else 0
+                    col_name = f"qs_sintoma_{s.replace(' ', '_').replace('/', '_')}"
+                    atendimento_dict[col_name] = 1 if s in qs_sintomas_list else 0
                 for r in REGIOES:
-                     if r not in ['N/A', 'Menstrual']:
-                         col_name = f"qs_regiao_{r.replace('/', '_').replace(' ', '_')}"
-                         csv_row_base[col_name] = 1 if r in qs_regioes_list else 0
+                    col_name = f"qs_regiao_{r.replace(' ', '_').replace('/', '_')}"
+                    atendimento_dict[col_name] = 1 if r in qs_regioes_list else 0
+                # --- Fim One-Hot ---
 
-
-                # Busca condutas associadas
+                # Busca condutas para este atendimento
                 cursor.execute("SELECT * FROM condutas WHERE atendimento_id = ?", (atendimento_id,))
                 condutas = cursor.fetchall()
-
+                
                 if not condutas:
-                    # Escreve a linha do atendimento sem dados de conduta
-                    writer.writerow(csv_row_base)
+                    # Escreve o atendimento principal mesmo sem conduta
+                    writer.writerow(atendimento_dict)
                 else:
-                    # Escreve uma linha para cada conduta, repetindo os dados do atendimento
+                    # Escreve uma linha para CADA conduta
                     for conduta_row in condutas:
                         conduta_dict = dict(conduta_row)
-                        csv_row_full = csv_row_base.copy() # Copia dados base
-                        csv_row_full.update({
-                            "id_conduta": conduta_dict.get("id"),
+                        # Renomeia chaves de conduta para evitar conflitos
+                        conduta_renamed = {
+                            "conduta_id": conduta_dict.get("id"),
                             "hipotese_diagnostica": conduta_dict.get("hipotese_diagnostica"),
                             "resumo_conduta": conduta_dict.get("resumo_conduta"),
                             "medicamento_administrado": conduta_dict.get("medicamento_administrado"),
                             "posologia": conduta_dict.get("posologia"),
                             "horario_medicacao": conduta_dict.get("horario_medicacao"),
-                            "observacoes_conduta": conduta_dict.get("observacoes"), # Renomeado
-                        })
-                        writer.writerow(csv_row_full)
-    except (ValueError, ConnectionError, sqlite3.Error, IOError) as e:
-         print(f"Erro ao exportar para CSV ({filepath}): {e}")
-         raise # Re-levanta para a GUI mostrar o erro
+                            "observacoes_conduta": conduta_dict.get("observacoes")
+                        }
+                        # Combina dict do atendimento com o da conduta e escreve
+                        combined_row = {**atendimento_dict, **conduta_renamed}
+                        writer.writerow(combined_row)
+    except Exception as e:
+        print(f"Erro ao exportar CSV: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if conn:
             conn.close()
-
-# Inicializa o caminho do DB ao importar o módulo (tentativa)
-# Isso pode ser movido para main.py para mais controle
-# import config_manager
-# initial_path = config_manager.load_db_path()
-# if initial_path:
-#     set_db_path(initial_path)
-# else:
-#     print("Caminho do banco de dados não encontrado na configuração inicial.")
 

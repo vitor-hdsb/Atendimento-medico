@@ -16,12 +16,13 @@ class Atendimento:
                  setor: str = "N/A",
                  processo: str = "N/A",
                  tenure: str = "N/A",
-                 # --- Campos de Queixa Modificados ---
+                 # --- MELHORIA: Adiciona tipo_atendimento ---
+                 tipo_atendimento: str = "N/A",
+                 # --- Fim Melhoria ---
                  qp_sintoma: str = "N/A",
                  qp_regiao: str = "N/A",
-                 qs_sintomas: str = "[]", # Salvo como string JSON
-                 qs_regioes: str = "[]", # Salvo como string JSON
-                 # --- Fim dos Campos Modificados ---
+                 qs_sintomas: str = "[]", # JSON string
+                 qs_regioes: str = "[]",  # JSON string
                  hqa: str = "N/A",
                  tax: str = "N/A",
                  pa_sistolica: str = "N/A",
@@ -36,9 +37,7 @@ class Atendimento:
                  data_atendimento: Optional[str] = None,
                  hora_atendimento: Optional[str] = None,
                  semana_iso: Optional[int] = None,
-                 id: Optional[int] = None, 
-                 queixas_principais: Optional[str] = None, # Mantido para kwargs
-                 **kwargs): # Aceita kwargs para ignorar extras
+                 id: Optional[int] = None, **kwargs): # Aceita kwargs para ignorar extras
         self.id = id
         self.badge_number = badge_number
         self.nome = nome
@@ -48,12 +47,13 @@ class Atendimento:
         self.setor = setor
         self.processo = processo
         self.tenure = tenure
-        # --- Campos de Queixa Modificados ---
+        # --- MELHORIA: Adiciona tipo_atendimento ---
+        self.tipo_atendimento = tipo_atendimento
+        # --- Fim Melhoria ---
         self.qp_sintoma = qp_sintoma
         self.qp_regiao = qp_regiao
         self.qs_sintomas = qs_sintomas
         self.qs_regioes = qs_regioes
-        # --- Fim dos Campos Modificados ---
         self.hqa = hqa
         self.tax = tax
         self.pa_sistolica = pa_sistolica
@@ -73,17 +73,21 @@ class Conduta:
     """Representa uma conduta médica."""
     def __init__(self,
                  hipotese_diagnostica: str = "N/A",
-                 # conduta_adotada removida
                  resumo_conduta: str = "N/A",
                  medicamento_administrado: str = "N/A",
                  posologia: str = "N/A",
                  horario_medicacao: str = "N/A",
-                 observacoes: str = "N/A", 
-                 conduta_adotada: Optional[str] = None, # Mantido para kwargs
-                 **kwargs): # Aceita kwargs para ignorar extras
+                 observacoes: str = "N/A",
+                 id: Optional[int] = None, # Adiciona ID para rastreamento
+                 atendimento_id: Optional[int] = None, # Adiciona atendimento_id
+                 **kwargs): # Aceita kwargs para ignorar extras (como conduta_adotada)
+        self.id = id
+        self.atendimento_id = atendimento_id
         self.hipotese_diagnostica = hipotese_diagnostica
+        # self.conduta_adotada = "N/A" # Campo não é mais usado
         self.resumo_conduta = resumo_conduta
         self.medicamento_administrado = medicamento_administrado
         self.posologia = posologia
         self.horario_medicacao = horario_medicacao
         self.observacoes = observacoes
+
