@@ -184,6 +184,10 @@
    'C:\\Users\\vitor\\Desktop\\Programa de atendimento '
    'medico\\Programa-de-atendimento-medico\\gui\\main_window.py',
    'PYMODULE'),
+  ('gui.options_editor_window',
+   'C:\\Users\\vitor\\Desktop\\Programa de atendimento '
+   'medico\\Programa-de-atendimento-medico\\gui\\options_editor_window.py',
+   'PYMODULE'),
   ('gzip',
    'C:\\Users\\vitor\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\gzip.py',
    'PYMODULE'),
@@ -279,6 +283,10 @@
    'PYMODULE'),
   ('lzma',
    'C:\\Users\\vitor\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\lzma.py',
+   'PYMODULE'),
+  ('main',
+   'C:\\Users\\vitor\\Desktop\\Programa de atendimento '
+   'medico\\Programa-de-atendimento-medico\\main.py',
    'PYMODULE'),
   ('models',
    'C:\\Users\\vitor\\Desktop\\Programa de atendimento '

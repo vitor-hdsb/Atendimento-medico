@@ -1,0 +1,15 @@
+{
+  "gestores": [],
+  "turnos": [
+    "Blue Day",
+    "Blue Night",
+    "Red Day",
+    "Red Night",
+    "MID",
+    "ADM",
+    "12X36 - Ímpar",
+    "12X36 - Par"
+  ],
+  "setores": [],
+  "processos": []
+}
